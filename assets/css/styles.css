@@ -1,0 +1,82 @@
+/* Make the container take up the full height */
+html, body {
+  height: 100%;
+  margin: 0;
+  font-family: Arial, sans-serif;
+}
+
+/* Style for the container that holds both columns */
+.container {
+  display: flex;
+  height: 100%;
+  width: 100%;
+}
+
+/* Style for the left column */
+.left {
+  width: 30%;
+  background-color: #f4f4f4;
+  padding: 20px;
+  box-sizing: border-box;
+  height: 100%;
+  position: sticky;
+  top: 0;
+}
+
+/* Hide the left column when it's not toggled */
+.left.hidden {
+  transform: translateX(-100%);
+}
+
+/* Style for hamburger button */
+.hamburger-menu {
+  display: none;
+  cursor: pointer;
+  font-size: 30px;
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  z-index: 1000;
+}
+
+/* Style for the right column */
+.right {
+  width: 70%;
+  padding: 20px;
+  box-sizing: border-box;
+  overflow-y: scroll;
+  height: 100%;
+}
+
+/* Style for profile image */
+.profile-pic {
+  width: 150px; /* Adjust this size as needed */
+  height: auto; /* Maintain aspect ratio */
+  border-radius: 50%; /* Optional: make it circular */
+  margin-bottom: 15px;
+}
+
+/* Add a little padding between the sections */
+.right h1 {
+  margin-top: 0;
+}
+
+/* Make the container responsive on smaller screens */
+@media (max-width: 768px) {
+  .container {
+    flex-direction: column;
+  }
+
+  .left {
+    width: 100%;
+  }
+
+  .right {
+    width: 100%;
+  }
+
+  /* Show hamburger on small screens */
+  .hamburger-menu {
+    display: block;
+  }
+}

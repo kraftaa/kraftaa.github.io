@@ -1,9 +1,10 @@
-theme: minima
 title: Rust and more
-description: A blog about Rust, tech and data engineering.
+description: A blog about Rust, tech, and data engineering.
 
-defaults:
-  - scope:
-      path: ""
-    values:
-      layout: "post"
+theme: minima
+#
+#defaults:
+#  - scope:
+#      path: ""
+#    values:
+#      layout: "post"
