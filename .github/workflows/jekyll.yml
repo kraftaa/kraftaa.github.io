@@ -4,9 +4,6 @@ on:
   push:
     branches:
       - main
-#  pull_request:
-#    branches:
-#      - main
 
 jobs:
   build:
@@ -14,7 +11,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Set up Ruby
         uses: ruby/setup-ruby@v1
@@ -25,14 +22,11 @@ jobs:
         run: |
           gem install bundler
           bundle install
-        working-directory: ${{ github.workspace }}
+        working-directory: ${{ github.workspace }}  # Explicit working directory
 
       - name: Build the Jekyll site
-        run: |
-          bundle exec jekyll build
-
-      - name: Build site
         run: bundle exec jekyll build
+        working-directory: ${{ github.workspace }}  # Ensure it runs in the root folder
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v3
