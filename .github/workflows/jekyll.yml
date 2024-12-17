@@ -28,14 +28,27 @@ jobs:
         run: |
           gem install bundler
           bundle install
-        working-directory: ${{ github.workspace }}  # Explicit working directory
+        working-directory: ${{ github.workspace }}
 
       - name: Build the Jekyll site
         run: bundle exec jekyll build
-        working-directory: ${{ github.workspace }}  # Ensure it runs in the root folder
+        working-directory: ${{ github.workspace }}
 
-      - name: Deploy to GitHub Pages
-        uses: actions/deploy-pages@v2
+      # Upload Jekyll build output as an artifact
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v1
         with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./_site
+          path: ./_site
+
+  # Deploy job
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v2
