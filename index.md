@@ -17,7 +17,8 @@ title: "A blog about Rust, tech and data engineering."
 
   <!-- Right column: Posts -->
   <div class="right">
-    <h1>Welcome to My blog about Rust and data engineering</h1>
+
+[//]: # (    <h1>Welcome to My blog about Rust and data engineering</h1>)
 
     <h2>All Posts</h2>
     <ul>
