@@ -107,7 +107,7 @@ pub struct User {
 
 // Combined Struct: in the task Combined Order combined_orders.rs
 #[derive(ParquetRecordWriter)]
-struct CombinedOrder {
+struct CombinedOrderRecord {
     order_id: i32,
     user_id: i32,
     user_name: String,
@@ -123,11 +123,11 @@ pub fn combined_orders(pg_uri: &str) -> (String, i64) {
     let orders = orders_dsl::orders.load::<Order>(&conn).unwrap();
     let users = users_dsl::users.load::<User>(&conn).unwrap();
 
-    let parquet_records: Vec<CombinedOrder> = orders
+    let parquet_records: Vec<CombinedOrderRecord> = orders
         .iter()
         .filter(|order| order.user_id.is_some())
         .map(|p| {
-            CombinedOrder {
+            CombinedOrderRecord {
                 order_id: order.order_id,
                 user_name: user.name.clone(),
                 country: user.country.clone(),
