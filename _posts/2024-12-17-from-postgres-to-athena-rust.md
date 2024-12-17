@@ -9,7 +9,7 @@ date: 2024-12-17
 I had a Postgres RDS database holding production data. While Postgres is great for transactional workloads, I faced multiple challenges when trying to perform heavy computations, aggregations, and data enrichment:
 
 ## Security Concerns:
-I didn’t want to give direct access to the Postgres RDS instance to other services or users. Instead, I wanted a secure and controlled way to read data, transform it, and expose only enriched results. Access was restricted to calls made only via a program (like an API call) for security.
+I didn’t want to give direct access to the Postgres RDS instance to other services or users. Instead, I wanted a secure and controlled way to read data, transform it, and expose only selected results. Access was restricted to calls made only via a program (like an API call) for security.
 
 ## Performance Issues:
 Running complex calculations directly on the Postgres instance was affecting query performance for other critical workloads.
@@ -149,7 +149,7 @@ This structured approach made the code cleaner and easier to maintain.
 The Rust program connected to the Postgres RDS instance and read data from orders and users tables.
 
 #### Transform:
-Using the EnrichedOrder struct, I combined and enriched the data, e.g., calculating amount_with_tax.
+Using the CombinedOrder struct, I combined and combined the data, e.g., calculating amount_with_tax.
 
 #### Load:
 Transformed data was written to S3 as Parquet files.
