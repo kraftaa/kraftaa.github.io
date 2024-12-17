@@ -35,7 +35,7 @@ Transformed data was stored in an S3 bucket in a columnar Parquet format. This r
 AWS Glue + Athena:
 
 AWS Glue was used to crawl the Parquet files on S3 and create metadata.
-Athena provided a cost-efficient way to query the enriched data using SQL.
+Athena provided a cost-efficient way to query the data using SQL.
 
 Struct/Table Representation in Rust
 
@@ -142,7 +142,7 @@ pub fn combined_orders(pg_uri: &str) -> (String, i64) {
 Here:
 
 Order and User represent the data fetched from Postgres.
-EnrichedOrder combines fields from both tables and includes a derived field amount_with_tax.
+CombinedOrder combines fields from both tables and includes a derived field amount_with_tax.
 This structured approach made the code cleaner and easier to maintain.
 ## ETL Workflow
 #### Extract:
@@ -184,6 +184,6 @@ Data in Athena is only as fresh as the last ETL run, so it may not be suitable f
 
 Writing and testing the Rust ETL pipeline required a significant upfront effort.
 #### Conclusion
-By moving ETL workloads to a Rust-based pipeline, I was able to address security concerns, reduce operational complexity, and optimize costs. Postgres remained focused on its core transactional role, while enriched data was efficiently stored and queried using modern tools like S3 and Athena.
+By moving ETL workloads to a Rust-based pipeline, I was able to address security concerns, reduce operational complexity, and optimize costs. Postgres remained focused on its core transactional role, while combined data was efficiently stored and queried using modern tools like S3 and Athena.
 
 This approach can be a template for teams looking to offload heavy ETL processes without burdening their databases.
