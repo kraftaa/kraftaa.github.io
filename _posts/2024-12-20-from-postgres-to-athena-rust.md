@@ -9,29 +9,42 @@ tags: [Rust, AWS, S3, Postgres]
 !!! Work in progress, many additions coming !!!
 
 ## Problem:
-I had a Postgres RDS database holding production data. While Postgres is great for transactional workloads, I faced multiple challenges when trying to perform heavy computations, aggregations, and data enrichment:
+This project began several years ago as a solution to a pressing need for providing data for company reporting in the absence of an established ETL process. The production data resided in a Postgres RDS database, but generating reports directly from the primary instance was not feasible. Doing so would have imposed additional load on the main application and required additional roles to handle live production data.
+
+Moreover, we needed to perform complex computations and aggregations and store the processed results for subsequent use in reporting. While Postgres excels at handling transactional workloads, it posed significant challenges when tasked with heavy computations, aggregations, and data enrichment.
 
 ## Security Concerns:
 I didn’t want to give direct access to the Postgres RDS instance to other services or users. Instead, I wanted a secure and controlled way to read data, transform it, and expose only selected results. Access was restricted to calls made only via a program (like an API call) for security.
 
 ## Performance Issues:
-Running complex calculations directly on the Postgres instance was affecting query performance for other critical workloads.
+Running complex calculations directly on the Postgres instance each time the user was opening the report or filtering it was affecting query performance for other critical workloads.
 
 ## Operational Complexity:
-Adding derived fields and combining multiple tables led to bloated schemas and queries that were difficult to maintain.
+Incorporating derived fields and merging data from multiple tables resulted in overly complex schemas for views and queries, making them increasingly difficult to manage and maintain. Additionally, several machine learning computations needed to be performed on the production data, but running these directly on live data was not feasible.
 
 ## Cost Concerns:
-Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) processes was becoming expensive.
+Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) processes was considered expensive at that time.
 
 # The Solution: ETL with Rust + Parquet + S3 + Glue + Athena
-Instead of performing everything within Postgres, I built an ETL pipeline in Rust. Here’s how it worked:
 
-![AWS Glue]({{site.baseurl}}/assets/img/glue.jpeg)
+[//]: # (![AWS Glue]&#40;{{site.baseurl}}/assets/img/glue.jpeg&#41;)
+<div style="display: flex; align-items: center; gap: 10px;">
+  <img src="{{site.baseurl}}/assets/img/kube.png" alt="Kubernetes" style="height: 100px;">
+  <img src="{{site.baseurl}}/assets/img/rust1.png" alt="Rust" style="height: 100px;">
+  <img src="{{site.baseurl}}/assets/img/s3.png" alt="AWS S3" style="height: 100px;">
+  <img src="{{site.baseurl}}/assets/img/glue.jpeg" alt="AWS Glue" style="height: 100px;">
+  <img src="{{site.baseurl}}/assets/img/athena.png" alt="AWS Athena" style="height: 100px;">
+</div>
+
+Instead of performing everything within Postgres, I built an ETL pipeline with Rust, AWS S3, GLue and Athena. Here’s how it worked:
 
 ## Rust Program:
 
 The program fetched data from Postgres, performed transformations (including derived fields and joins across tables), and saved the output in Parquet format.
 Using Rust allowed me to optimize performance and maintain type safety by representing tables as Rust structs.
+Rust's type-checking served as a robust safeguard for ensuring the integrity of production data. If the production system encountered any invalid values or NaNs, the Rust process would immediately detect the issue and send an error notification, helping to maintain data accuracy and reliability.
+
+The Rust program was deployed in a Kubernetes environment using a Helm chart. The chart configured a service account with the appropriate role-based access to AWS services, including S3 and Glue. Additionally, the Helm chart utilized a Kubernetes secret to securely manage the connection credentials for the RDS instance, ensuring secure and efficient integration with the necessary resources.
 
 Parquet Files on S3:
 
