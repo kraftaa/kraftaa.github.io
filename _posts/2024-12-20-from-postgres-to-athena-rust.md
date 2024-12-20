@@ -2,7 +2,10 @@
 layout: post
 title: "From Postgres to Athena: Optimizing Workflows with Rust, Parquet, and S3"
 date: 2024-12-17
+img: rust-aws.png
+tags: [Rust, AWS, S3, Postgres]
 ---
+
 !!! Work in progress, many additions coming !!!
 
 ## Problem:
@@ -22,6 +25,8 @@ Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) pro
 
 # The Solution: ETL with Rust + Parquet + S3 + Glue + Athena
 Instead of performing everything within Postgres, I built an ETL pipeline in Rust. Here’s how it worked:
+
+![AWS Glue]({{site.baseurl}}/assets/img/glue.jpeg)
 
 ## Rust Program:
 
