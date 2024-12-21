@@ -2,7 +2,7 @@
 layout: post
 title: "From Postgres to Athena: Optimizing Workflows with Rust, Parquet, and S3"
 date: 2024-12-17
-img: rust4.png
+img: rust3.png
 tags: [Rust, AWS, S3, Postgres]
 ---
 
@@ -36,7 +36,11 @@ Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) pro
   <img src="{{site.baseurl}}/assets/img/athena.png" alt="AWS Athena" style="height: 100px;">
 </div>
 
-Instead of performing everything within Postgres, I built an ETL pipeline with Rust, AWS S3, GLue and Athena. Here’s how it worked:
+Instead of performing everything within Postgres, I built an ETL pipeline with Rust, AWS S3, GLue and Athena.
+
+Thes Rust project was originally initiated by my colleague and Rust wizard, [Xavier](https://github.com/xrl). His guidance and expertise helped me not only get started with Rust but also truly appreciate its beauty, power, and advantages. Thanks to his mentorship, I’ve come to love working with Rust and have seen firsthand how it can transform complex workflows (or make it even more complex but very fast :smile: ) .
+
+Here’s how it worked:
 
 ## Rust Program:
 
@@ -54,109 +58,88 @@ AWS Glue + Athena:
 
 AWS Glue was used to crawl the Parquet files on S3 and create metadata.
 Athena provided a cost-efficient way to query the data using SQL.
+The reports leveraged Athena tables and views as the foundation for data visualization.
 
-Struct/Table Representation in Rust
+Rust program had the next structure:
 
-I mapped each table from Postgres to a Rust struct to ensure type safety and to handle transformations effectively. Here’s an example:
+- project_aws
+- project_cli
+- project_kube
+- project_extra_source
+- project_insert_data
+- project_parquet
+- project_schemas
+- project_tasks
+- project_partition_dates    
 
-#### For instance, assume I had two tables:
+Why this project structure?
+It was designed to allow for the separation of tasks and crates in Cargo.toml. This separation enabled me to build and manage each component independently, avoiding unnecessary complexity and performance bottlenecks. It also provided better visibility into the performance of individual areas, making it easier to track and optimize each part of the system.
+
+#### Struct/Table Representation in Rust are in **_project_schemas_**
+
+To ensure type safety and facilitate data transformations, I mapped each Postgres table to a corresponding Rust struct. Initially, this mapping was done manually, but later I discovered the powerful _**diesel_ext**_ crate,  later _**diesel_cli_ext**_, which allowed me to automatically map the schema from Postgres to Rust structs.
+
+The process was automated through a _**Makefile**_ command. Here's how it works:
+
+The create-model target in the _**Makefile**_ generates the necessary Rust files for each table. It begins by creating a _diesel.toml_ file for the table, which defines how the schema is printed.
+The command then adds the module for the table to various locations in the project, including _**mod.rs**_ files for organizing the project’s code structure.
+Using the _**diesel**_ print-schema command, the schema for the specified table is fetched from the local Postgres database and saved to a Rust file.
+The _**diesel_ext**_ crate is then used to generate the Rust struct for that table, which is placed in the appropriate module.
+
+I created also a _**template_task**_ which was a blue-print for most tasks and used the _**sed**_ command to customize tasks files (using [_**template_task**_](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-template_task-rs) ), creating a corresponding task in the project.
+This streamlined the process significantly, allowing for efficient table mapping and the integration of the database schema into Rust code with minimal manual intervention.
+
+Here’s the Makefile command that does all of this:
+
+Makefile
+
+<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=create_model.rs"></script>
+
+This approach saved considerable time and reduced the chance of errors by automating the mapping process.
+
+
+Here’s an example of the Postgres table, a corresponding struct and the task:
+
+#### For instance, assume I had several postgres tables:
 
 **Table 1: orders**
 
-| id | user_id | amount | created_at |
-|----|---------|--------|------------|
-| 1  | 101     | 200.5  | 2024-01-01 |
-| 2  | 102     | 450.0  | 2024-01-02 |
+| id | user_id | amount | created_at | uuid                                   |
+|----|---------|--------|------------|----------------------------------------|
+| 1  | 101     | 200.5  | 2024-01-01 | "aaaaaaaa-1111-3333-5555-oooooooooooo" | 
+| 2  | 102     | 450.0  | 2024-01-02 | "bbbbbbbb-2222-4444-6666-pppppppppppp" |
 
 **Table 2: users**
 
-| id  | name    | country |
-|-----|---------|---------|
-| 101 | Alice   | USA     |
-| 102 | Bob     | Canada  |
+| id  | name    | country | created_at | email              |
+|-----|---------|---------|------------|--------------------|
+| 101 | Alice   | USA     | 2023-01-01 | email1@example.com |
+| 102 | Bob     | Canada  | 2023-01-02 | email2@example.com |
+
+**Table 3: products**
+
+| id | name     | quantity | created_at | approved | price |
+|----|----------|----------|------------|----------|-------|
+| 1  | product1 | 350      | 2023-01-10 | true     | 35.20 |
+| 2  | product2 | 70       | 2023-01-20 | false    | 41.05 |
+| 3  | product3 | 2        | 2023-01-20 | true     | 11.05 |
 
 To combine these tables and add calculated fields, the Rust program used the following structs:
 
-```rust
-// Table 1: Orders
-// order.rs for Postgres diesel schema
-table! {
-    orders (id) {
-        id -> Int4,
-        user_id -> Nullable<Int4>,
-        amount -> Nullable<BigDecimal>,
-        created_at -> Nullable<Timestamp>,
-        uuid -> Uuid,
-    }
-}
-// orders.rs for the struct   
-use uuid::Uuid;
-use bigdecimal::BigDecimal;
-use chrono::NaiveDateTime;
-#[derive(Queryable, Debug)]
-pub struct Order {
-    pub id: i32,
-    pub user_id: Option<i32>,
-    pub amount: f64,
-    pub created_at: Option<NaiveDateTime>,
-    pub uuid: Uuid,
-}
+<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tables_structs.rs"></script>)
 
-// Table 2: Users
-// user.rs for Postgres diesel schema
-table! {
-    users (id) {
-        id -> Int4,
-        name -> Nullable<Varchar>,
-        country -> Nullable<Varchar>,
-        created_at -> Nullable<Timestamp>,
-        email -> Nullable<Varchar>,
-    }
-}
-// users.rs for the struct
-#[derive(Queryable, Debug)]
-pub struct User {
-    pub id: i32,
-    pub name: Option<String>,
-    pub country: Option<String>,
-    pub creted_at: Option<NaiveDateTime>,
-    pub email: Option<String>,
-}
 
-// Combined Struct: in the task Combined Order combined_orders.rs
-#[derive(ParquetRecordWriter)]
-struct CombinedOrderRecord {
-    order_id: i32,
-    user_id: i32,
-    user_name: String,
-    country: String,
-    amount: f64,
-    amount_with_tax: f64,
-    created_at: Option<NaiveDateTime>,
-}
+The table and struct definitions were organized within the project_schemas directory. This directory included the tables and models subdirectories, each housing the respective definitions. Additionally, a mod.rs file was used to list and manage all the tables and models for easier access and modularity.
 
-pub fn combined_orders(pg_uri: &str) -> (String, i64) {
-    let conn = PgConnection::establish(pg_uri).unwrap();
-    let orders_load = Instant::now();
-    let orders = orders_dsl::orders.load::<Order>(&conn).unwrap();
-    let users = users_dsl::users.load::<User>(&conn).unwrap();
-
-    let parquet_records: Vec<CombinedOrderRecord> = orders
-        .iter()
-        .filter(|order| order.user_id.is_some())
-        .map(|p| {
-            CombinedOrderRecord {
-                order_id: order.order_id,
-                user_name: user.name.clone(),
-                country: user.country.clone(),
-                amount: order.amount,
-                amount_with_tax: order.amount * (1.0 + tax_rate),  // Calculation
-                created_at: order.created_at,
-            }
-        });
-}
-
+```plaintext
+project_schemas
+├── tables
+└── models
 ```
+
+<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs"></script>
+
+
 Here:
 
 Order and User represent the data fetched from Postgres.
@@ -171,6 +154,50 @@ Using the CombinedOrder struct, I combined and combined the data, e.g., calculat
 
 #### Load:
 Transformed data was written to S3 as Parquet files.
+
+The project_aws module contains functions that define the AWS SDK provider for connecting to AWS services. It handles tasks such as loading and streaming data to S3, starting AWS Glue jobs, and managing the flow of data through these services.
+
+When we needed to perform calculations separately, such as using a machine learning model, the module was also responsible for reading data from S3, processing it, and then storing the results back into the Postgres database. This was accomplished by leveraging different versions of the AWS Rust SDK, which evolved over time as better crates became available, allowing us to take advantage of more efficient and feature-rich solutions.
+
+The overall approach ensured smooth integration with AWS services, allowing us to handle large datasets and computational tasks in a highly scalable and cost-effective manner.
+
+Initially we used crates for AWS:
+- rusoto_core
+- rusoto_s3
+- rusoto_glue
+
+But later switched to these when they become available:
+- aws-sdk-s3
+- aws-sdk-glue
+- aws-sdk-athena
+- aws-config
+- aws-credential-types
+- aws-smithy-async
+- aws-smithy-types
+- aws-smithy-runtime-api
+
+
+Here is the upload function
+
+<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=upload_to_s3.rs"></script>)
+
+These operations can take time, so rather than blocking the execution of the entire program while waiting for them to complete, I allow the program to continue doing other things while waiting for the results.
+Later using these functions I got into some 'freeze' but I'll write about it later.
+
+We also used to have
+```rust
+let credentials_provider = DefaultCredentialsProvider::new().map_err(Box::new)?
+```
+but later switched to `aws_config`
+
+After uploading file to S3 we had to crawl it with the Glue crawler, but initially had to create the function which would create crawler if it didn't exist.
+
+<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=create_crawler.rs"></script>)
+
+Then we need to start a crawler which was the tricky part: if the crawler has already started, it will produce an error and stop the program execution.
+For that we added a part for waiting with up to 20 attempts until the crawler was ready,
+
+<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=start_crawler.rs"></script>)
 
 ####  Query:
 Using AWS Glue, I crawled the Parquet files to make them queryable. Athena was then used to query the data efficiently.
