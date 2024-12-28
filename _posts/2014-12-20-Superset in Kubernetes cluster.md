@@ -6,7 +6,7 @@ img: superset.png
 tags: [Kubernetes, Superset]
 ---
 
-!!! Work in progress, many additions coming !!!
+Coming soon.
 
 ## Problem:
 Need to run reporting software in Kubernetes cluster with many complicated reports and visualization.
