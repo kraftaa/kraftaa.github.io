@@ -1449,6 +1449,20 @@ a.newer-posts:hover {
   .contact-title, .copyright {
     display: none;
   }
+  /* Add limits to line lengths for better readability */
+  .content-box,
+  .post .post-content {
+    max-width: 90%; /* Prevent overly wide text */
+    margin: 0 auto; /* Center content */
+  }
+
+  /* Ensure code blocks wrap and do not overflow */
+  pre, code {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 14px; /* Reduce font size for smaller screens */
+    line-height: 1.4; /* Adjust line height for readability */
+  }
 }
 
 /* Extra Small Devices, Phones */
@@ -1477,5 +1491,19 @@ a.newer-posts:hover {
   }
   .post .post-content .post-title a {
     font-size: 21px;
+  }
+  /* Add limits to line lengths for better readability */
+  .content-box,
+  .post .post-content {
+    max-width: 90%; /* Prevent overly wide text */
+    margin: 0 auto; /* Center content */
+  }
+
+  /* Ensure code blocks wrap and do not overflow */
+  pre, code {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    font-size: 14px; /* Reduce font size for smaller screens */
+    line-height: 1.4; /* Adjust line height for readability */
   }
 }
