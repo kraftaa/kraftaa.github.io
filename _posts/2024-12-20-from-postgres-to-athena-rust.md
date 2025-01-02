@@ -6,10 +6,13 @@ img: rust3.png
 tags: [Rust, AWS, S3, Postgres]
 ---
 
-!!! Work in progress, many additions coming !!!
+! Work in progress, many additions coming !
 
 ## Problem:
-This project began several years ago as a solution to a pressing need for providing data for company reporting in the absence of an established ETL process. The production data resided in a Postgres RDS database, but generating reports directly from the primary instance was not feasible. Doing so would have imposed additional load on the main application and required additional roles to handle live production data.
+This project began several years ago as a solution to a pressing need for providing data for company reporting in the absence 
+of an established ETL process. The production data resided in a Postgres RDS database, but generating reports directly from 
+the primary instance was not feasible. Doing so would have imposed additional load on the main application and required additional 
+roles to handle live production data.
 
 Moreover, we needed to perform complex computations and aggregations and store the processed results for subsequent use in reporting. While Postgres excels at handling transactional workloads, it posed significant challenges when tasked with heavy computations, aggregations, and data enrichment.
 
