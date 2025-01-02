@@ -1506,4 +1506,21 @@ a.newer-posts:hover {
     font-size: 14px; /* Reduce font size for smaller screens */
     line-height: 1.4; /* Adjust line height for readability */
   }
+
+  /* Restrict the Gist embed */
+  .code-container {
+    overflow-x: auto; /* Enable horizontal scrolling */
+    width: 50%; /* Ensure it fits the container width */
+    max-width: 50%; /* Prevent it from exceeding the parent width */
+    padding: 10px; /* Optional: Add padding for better visibility */
+    box-sizing: border-box; /* Include padding in width calculations */
+    background-color: #f8f8f8; /* Optional: Add background */
+    border: 1px solid #ddd; /* Optional: Add border */
+    border-radius: 5px; /* Optional: Rounded corners */
+  }
+
+  .code-container iframe {
+    width: 50%; /* Force iframe to fit its container */
+    max-width: 50%; /* Prevent the iframe from overflowing */
+  }
 }
