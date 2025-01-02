@@ -2,7 +2,8 @@
 layout: post
 title: "From Postgres to Athena: Optimizing Workflows with Rust, Parquet, and S3"
 date: 2024-12-17
-img: rust1.png
+img: postgresql3.png
+#img: rust3.png
 tags: [Rust, AWS, S3, Postgres]
 ---
 
