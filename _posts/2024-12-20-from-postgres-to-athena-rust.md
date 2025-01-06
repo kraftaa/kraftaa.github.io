@@ -218,73 +218,132 @@ Here’s an example of the Postgres table, a corresponding struct and the task:
 
 **Table 1: orders**
 
-
 | id | user_id | amount | created_at | uuid                                   |
-
 |----|---------|--------|------------|----------------------------------------|
-
-| 1  | 101     | 200.5  | 2024-01-01 | "aaaaaaaa-1111-3333-5555-oooooooooooo" | 
-
+| 1  | 101     | 200.5  | 2024-01-01 | "aaaaaaaa-1111-3333-5555-oooooooooooo" |
 | 2  | 102     | 450.0  | 2024-01-02 | "bbbbbbbb-2222-4444-6666-pppppppppppp" |
-
 
 **Table 2: users**
 
-
 | id  | name    | country | created_at | email              |
-
 |-----|---------|---------|------------|--------------------|
-
 | 101 | Alice   | USA     | 2023-01-01 | email1@example.com |
-
 | 102 | Bob     | Canada  | 2023-01-02 | email2@example.com |
-
 
 **Table 3: products**
 
-
 | id | name     | quantity | created_at | approved | price |
-
 |----|----------|----------|------------|----------|-------|
-
 | 1  | product1 | 350      | 2023-01-10 | true     | 35.20 |
-
 | 2  | product2 | 70       | 2023-01-20 | false    | 41.05 |
-
 | 3  | product3 | 2        | 2023-01-20 | true     | 11.05 |
-
 
 To combine these tables and add calculated fields, the Rust program used the following structs:
 
 
-<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tables_structs.rs"></script>)
+<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tables_structs.rs"></script>
 
 
+The table and struct definitions were organized within the _project_schemas_ directory. This directory included the tables and models subdirectories, each housing the respective definitions. Additionally, a mod.rs file was used to list and manage all the tables and models for easier access and modularity.
 
-The table and struct definitions were organized within the project_schemas directory. This directory included the tables and models subdirectories, each housing the respective definitions. Additionally, a mod.rs file was used to list and manage all the tables and models for easier access and modularity.
-
-
-```plaintext
-
+```shell
 project_schemas
-
 ├── tables
-
 └── models
-
 ```
 
-
-<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs"></script>
-
-
+<div class="code-container">
+    <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs"></script>
+</div>
 
 Here:
 
-
 _Order_ and _User_ represent the tables fetched from Postgres.
+```shell
+let products = products_dsl::products.load::<Product>(&conn).unwrap();
+```
+is part of a query using _Diesel_, an _ORM (Object-Relational Mapper)_ library for interacting with databases in Rust.
+This line brings into scope the _DSLs (Domain-Specific Languages)_ for interacting with tables in the database. Diesel uses DSLs to generate SQL queries and map the results to Rust types. The products::dsl, orders::dsl, and users::dsl refer to the tables orders, users, and products respectively, and I'm giving them aliases (orders_dsl, users_dsl, products_dsl) for convenience.
+_products_dsl::products_
 
-CombinedOrder combines fields from both tables and includes a derived field _amount_with_tax_.
+_products_dsl_ is the alias I created for _products::dsl_. _Diesel_ automatically generates a _products_ variable (referring to the products table in the database) within this DSL module, which represents the table in the database.
+
+``.load::<Product>()`` is a Diesel method used to execute the query and load the results into a collection of Rust structs `Vec<Product>`.
+
+_Product_ is a _Rust_ struct representing the schema of the products table (i.e., it maps the columns of the _products_ table to fields in the _Product_ struct).
+
+_&conn_ is a reference to a database connection, which is used to execute the query against the database. This connection is established using Diesel’s connection API (e.g., _PgConnection_ for PostgreSQL).
+
+_.unwrap()_ is used to unwrap the _Result_ returned by ``load::<Product>()``. This method will either return the query results (if successful) or panic if there was an error.
+Usually it is discouraged to use `unwrap` in production code unless I am  certain that the query will succeed, as it causes the program to panic on an error.
+We were using `unwrap` as wanted the program to panic and stop running, which will give us a clear sign that the data is not updated.
+If I implemented it now I will rather use `expect` with the custom message but keep the panicking behaviour.
+```shell
+let products = products_dsl::products
+    .load::<Product>(&conn)
+    .expect("Failed to load products from the database");
+```
+Or this one to return an error and later handle the error in some way
+
+```shell
+let products = match products_dsl::products.load::<Product>(conn) {
+        Ok(products) => products,
+        Err(e) => {
+            eprintln!("Error loading products: {}", e);
+            return Err(e); // Return early with the error
+        }
+    };
+```
+Definitely NOT this one `unwrap_or_else` like this 
+```shell
+let products = products_dsl::products
+    .load::<Product>(&conn)
+    .unwrap_or_else(|e| {
+        eprintln!("Error loading products: {}", e);
+        Vec::new() // Return an empty vector as the fallback
+    });
+```
+as here I will get an empty `Vec<Product>` into my data.
+
+Usually the `panic!()` was caused by changes in the underlying Postgres tables, like removed column, unexpected type etc. I couldn't dynamically construct a struct in Rust with Diesel - so if I had a column in my table! macro definition and a struct but `.load::<Product>` didn't find it - it will result in panic.
+In that case running the task further which was loading this table didn't make sense hence `panic!()` behaviour was justified.
+
+
+I wanted to see how long it takes to load some tables, for that I have
+```rust
+    let users_load = Instant::now();
+    let users = users_dsl::users.load::<User>(&conn).unwrap();
+    trace!("load users took: {:?}", users_load.elapsed());
+```
+where `Instant::now()` creates a new Instant that represents the current time, essentially starting a stopwatch.
+`trace!` lane logs the time taken to execute the query and to load the table users from the database. It uses the trace! macro, which is typically used for logging at a fine-grained level (very detailed). The elapsed() duration is formatted and printed to show how long the query took to execute.
+The elapsed() method in Rust returns a Duration object, which represents the amount of time that has passed since the Instant was created. The unit of time in Duration is typically in nanoseconds (ns).
+This information could be useful for monitoring and optimization.
+The duration could be converted to different units as 
+```rust
+println!("Elapsed time in milliseconds: {:?}", users_load.as_millis());
+println!("Elapsed time in seconds: {:?}", users_load.as_secs());
+println!("Elapsed time in microseconds: {:?}", users_load.as_micros());
+```
+
+I want to collect all users ids and also all product ids from the users table
+```rust
+let users_ids: Vec<i32> = users.iter().map(|x| x.id).collect();
+trace!("{:?}", users_ids.len());
+let products_ids: Vec<i32> = users.iter().filter_map(|x| x.product_id).collect();
+```
+`.map(|x| x.id)` takes every users record, extract value from the field `id` and collects them into a vector if integers `Vec<i32>`.
+
+`users.iter().filter_map(|x| x.product_id).collect();` creates a vector (products_ids) that contains the product_id field of each user from the users vector, but only if product_id is Some(i32). The filter_map function filters out None values and collects only Some(i32) values into the vector. This results in a list of product_ids from users.
+
+I want to get currency, correspoinding with the product_id so for that I load currencies table, filtering it by two fields: `type` and `type_id`
+
+`.filter(currencies_dsl::type.eq("Product"))`
+Filters the currencies table to only include rows where the type column is equal to "Product".
+`.filter(currencies_dsl::type_id.eq(any(&products_ids[..])))`
+Filters the currencies table to only include rows where the type_id column matches one of the product_ids from the users table.
+
+_CombinedOrder_ combines fields from both tables and includes a derived field _amount_with_tax_.
 
 This structured approach made the code cleaner and easier to maintain.
 
@@ -357,9 +416,7 @@ Later using these functions I got into some 'freeze' but I'll write about it lat
 We also used to have
 
 ```rust
-
 let credentials_provider = DefaultCredentialsProvider::new().map_err(Box::new)?
-
 ```
 
 but later switched to `aws_config`
