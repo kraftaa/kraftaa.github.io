@@ -97,9 +97,14 @@ AWS Glue + Athena:
 
 AWS Glue was used to crawl the Parquet files on S3 and create metadata.
 
-Athena provided a cost-efficient way to query the data using SQL.
-
+Athena provided a cost-efficient way to query the data using SQL. Bear in mind that Athena doesn't create real tables or materialized views, it only creates a metadata and reads everything from the file, stored in S3.
 The reports leveraged Athena tables and views as the foundation for data visualization.
+The cons of such approach is that it's possible to delete underlying file without getting any warnings/restrictions about dependant views, tables etc.
+Athena also doesn't provide indexing as it's just a querying tool. It also doesn't support ***CREATE TABLE LIKE*** or ***DELETE FROM*** or ***UPDATE***, but it allows to give an access to query a table without a fear that the table would be dropped as behind a hood it's a file in s3.
+AWS Glue provides a mechanism for partitioning and indexing with the limitations: 
+- only partition column could be used as an index
+- only integer and strings could be used as an index
+
 
 
 Rust program had the next structure:
@@ -131,11 +136,44 @@ It was designed to allow for the separation of tasks and crates in Cargo.toml. T
 
 #### Struct/Table Representation in Rust are in **_project_schemas_**
 
+In order to read the tables and perform some calculations and also to ensure type safety  I had to map each Postgres table to a corresponding Rust struct. Initially, this mapping was done manually, but later I discovered the powerful _**diesel_ext**_ crate (later _**diesel_cli_ext**_), which allowed me to automatically map the schema from Postgres to Rust structs. I still had to create diesel _table!_ macro definition which was done with the help of _bash_ script:
 
-To ensure type safety and facilitate data transformations, I mapped each Postgres table to a corresponding Rust struct. Initially, this mapping was done manually, but later I discovered the powerful _**diesel_ext**_ crate,  later _**diesel_cli_ext**_, which allowed me to automatically map the schema from Postgres to Rust structs.
+```commandline
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_name = 'orders';
+```
+which was giving me 
+```shell
+           column_name           |          data_type          | is_nullable 
+---------------------------------+-----------------------------+-------------
+ id                              | integer                     | NO
+ active                          | boolean                     | NO
+ name                            | character varying           | YES
+ created_at                      | timestamp without time zone | NO
+ data                            | jsonb                       | YES
+ ...
+```
+which together with a bash script would give diesel _table!_ macro definition:
+<div class="code-container">
 
+  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=table_macro.sh"></script>
 
-The process was automated through a _**Makefile**_ command. Here's how it works:
+</div>
+
+and the definition would be:
+```shell
+table! {
+    orders (id) {
+        id -> Int4,
+        active -> Bool,
+        name -> Nullable<Varchar>,
+        created_at -> Timestamp,
+        data -> Nullable<Jsonb>,
+    }
+}
+```
+The process of creating a struct was automated through a _**Makefile**_ command. Here's how it works:
 
 
 The create-model target in the _**Makefile**_ generates the necessary Rust files for each table. It begins by creating a _diesel.toml_ file for the table, which defines how the schema is printed.
@@ -166,15 +204,12 @@ Makefile
 
 Test
 
-
-
 <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=create_model.rs"></script>
 
 
-This approach saved considerable time and reduced the chance of errors by automating the mapping process.
+This approach saved considerable time and reduced the chance of errors with types/nullables by automating the mapping process.
 
-
-
+Now I would rather put everything into combined bash script which would run over the predefined list of tables and create _table!_ macro definition and a corresponding struct with a task, but the existing approach worked well for years and I won't change it, as its life is coming to the end due to change in the infrastructure.
 Here’s an example of the Postgres table, a corresponding struct and the task:
 
 
@@ -247,9 +282,9 @@ project_schemas
 Here:
 
 
-Order and User represent the data fetched from Postgres.
+_Order_ and _User_ represent the tables fetched from Postgres.
 
-CombinedOrder combines fields from both tables and includes a derived field amount_with_tax.
+CombinedOrder combines fields from both tables and includes a derived field _amount_with_tax_.
 
 This structured approach made the code cleaner and easier to maintain.
 
