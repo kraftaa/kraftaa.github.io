@@ -330,18 +330,69 @@ I want to collect all users ids and also all product ids from the users table
 ```rust
 let users_ids: Vec<i32> = users.iter().map(|x| x.id).collect();
 trace!("{:?}", users_ids.len());
-let products_ids: Vec<i32> = users.iter().filter_map(|x| x.product_id).collect();
+let order_ids: Vec<i32> = users.iter().filter_map(|x| x.order_id).collect();
 ```
 `.map(|x| x.id)` takes every users record, extract value from the field `id` and collects them into a vector if integers `Vec<i32>`.
 
-`users.iter().filter_map(|x| x.product_id).collect();` creates a vector (products_ids) that contains the product_id field of each user from the users vector, but only if product_id is Some(i32). The filter_map function filters out None values and collects only Some(i32) values into the vector. This results in a list of product_ids from users.
+`users.iter().filter_map(|x| x.order_id).collect();` creates a vector (order_ids) that contains the order_id field of each user from the users vector, but only if order_id is Some(i32). The filter_map function filters out None values and collects only Some(i32) values into the vector. This results in a list of order_ids from users.
 
-I want to get currency, correspoinding with the product_id so for that I load currencies table, filtering it by two fields: `type` and `type_id`
+I want to get currency, corresponding with the product_id so for that I load currencies table, filtering it by two fields: `type` and `type_id`
 
-`.filter(currencies_dsl::type.eq("Product"))`
-Filters the currencies table to only include rows where the type column is equal to "Product".
-`.filter(currencies_dsl::type_id.eq(any(&products_ids[..])))`
-Filters the currencies table to only include rows where the type_id column matches one of the product_ids from the users table.
+`users.iter()`
+
+Creates an iterator over the users vector, producing references to each User object.
+`.filter(currencies_dsl::type.eq("Order"))`
+Filters the currencies table to only include rows where the type column is equal to "Order".
+`.filter(currencies_dsl::type_id.eq(any(&order_ids[..])))`
+Filters the currencies table to only include rows where the type_id column matches one of the order_ids from the users table.
+
+Now I want to have a HashMap where keys are `order_id` and the values are references to the corresponding Currency objects.
+
+```rust
+let currencies_by_order_id: HashMap<i32, &Currency> = currencies
+    .iter()
+    .map(|x| (x.type_id.unwrap(), x))
+    .collect();
+```
+`currencies.iter()`
+
+Creates an iterator over the currencies vector, producing references to each Currency object.
+
+`map(|x| (x.type_id.unwrap(), x))`
+
+For each Currency object x:
+`x.type_id.unwrap()` retrieves the `type_id` value from the `Option<i32>`. This assumes that all `type_id` values are Some and will panic if any type_id is None.
+The closure returns a tuple (type_id, x), where type_id becomes the key and x (a reference to the Currency object) becomes the value.
+
+`collect()`
+
+Converts the iterator of (key, value) pairs into a HashMap.
+
+`HashMap<i32, &Currency>`
+
+The resulting HashMap has:
+Keys of type i32, representing the unwrapped type_id values.
+Values of type &Currency, which are references to the Currency objects.
+
+Which creates kind of lookup table, when I can pass a key (type_id = order_id in our case) and get a corresponding Currency object with all the fields.
+
+_CombinedOrder_ combines fields from both tables and includes a derived field _amount_usd_ using the information from currencies table and _amount_with_tax_ using the information from taxes table.
+
+`orders.iter().filter(|order| order.user_id.is_some())` filters out orders where the user_id is None. This ensures only orders associated with a user are processed further.
+
+The `.map(|o| { ... })` transforms each filtered order (o) into a new representation, producing a `CombinedOrderRecord`.
+`let currency = currencies_by_order_id_id.get(&o.id)` retrieves the currency information for the current order from the `currencies_by_order_id_id` `HashMap` mapping described above, using the order's id as a key. If no entry exists, currency is None.
+`let conversion_rate = ...` extracts the conversion rate from the currency (if it exists). 
+The logic:
+`currency.map(|x| ...)` operates on the optional currency object.
+If a currency exists, its `conversion_rate` is cloned and converted to an f64. 
+If this fails, an `expect` statement ensures a panic with an error message.
+If no currency exists (`currency.is_none()`), a default conversion rate of `1.0` is used via `.unwrap_or(1.0)`.
+`let currency_name = ...` uses the same logic:
+If no currency exists, the fallback is `.unwrap_or_else(|| "USD".to_string())`.
+
+With similar logic I extract Tax object based on the corresponding `order_id` and getting a `tax_rate` via `let tax_rate = taxes.map(|x| x.rate.to_f64().expect("tax rate bigdecimal to f64"));` with a descriptive error message - In case the conversion to f64 failed I know which field is responsible for that.
+
 
 _CombinedOrder_ combines fields from both tables and includes a derived field _amount_with_tax_.
 
