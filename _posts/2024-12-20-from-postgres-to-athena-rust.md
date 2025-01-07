@@ -523,6 +523,7 @@ Use Cases:
 - Interfacing with C code.
 - Optimizing performance when known that the operations are safe.
 - Implementing custom data structures or memory allocators.)
+
 Example:
 ```rust
 let x = 1;
@@ -542,8 +543,34 @@ Instead, Arc<T> (atomic reference counter) is used for thread-safe shared owners
 
 Example:
 ```rust
+use std::rc::Rc;
 
+let data = Rc::new(42);
+
+let cloned = Rc::clone(&data); // Safe in a single-threaded context
+// Rc is NOT `Send`, so it cannot be shared between threads
 ```
+
+Unsafe Data Structures
+Structures that allow direct, uncontrolled access to their internals, like raw pointers or custom synchronization primitives without proper locking mechanisms.
+Global State
+Global variables or mutable static variables can lead to data races if accessed without proper synchronization.
+Example of Non-Thread-Safe Code:
+```rust
+use std::cell::RefCell;
+
+let data = RefCell::new(5);
+// RefCell is not thread-safe, so this would cause issues in a multi-threaded context
+*data.borrow_mut() = 10;
+```
+
+Thread-Safe Alternatives
+For non-thread-safe types, Rust provides thread-safe alternatives:
+
+Instead of Rc<T>: Use Arc<T> for thread-safe reference counting.
+Instead of RefCell<T>: Use Mutex<T> or RwLock<T> for synchronized interior mutability.
+Global State: Use lazy_static or OnceCell for safe initialization of global variables.
+
 `Sync Trait`
 A type that implements `Sync` can safely be shared between threads by reference.
 For example, if `T` is `Sync`, then `&T` (a shared reference to `T`) can be accessed by multiple threads simultaneously without issues.
@@ -562,6 +589,161 @@ thread::spawn(move || {
     println!("{:?}", data_clone); // Safe because `Arc` is `Sync` and `Send`
 }).join().unwrap();
 ```
+Why Arc is Sync and Send
+Arc<T> (Atomic Reference Counted) is a smart pointer in Rust used for shared ownership of a value in a thread-safe manner. It achieves this by using atomic operations to manage its reference count, making it safe for use across multiple threads.
+
+How Sync Applies to Arc<T>
+A type T is Sync if it can be safely shared between threads by reference (&T).
+Arc<T> is Sync because:
+It ensures atomicity of its reference count updates.
+The underlying data is immutable (by default) or access to it is protected (e.g., using locks like Mutex or RwLock), preventing data races.
+How Send Applies to Arc<T>
+A type T is Send if it can be safely transferred between threads.
+Arc<T> is Send because:
+Its internal reference count is updated atomically, so moving it to another thread does not cause unsafe behavior.
+The ownership of the Arc pointer itself (not the underlying data) is transferred safely.
+
+We used to have 
+```rust
+let props = Arc::new(WriterProperties::builder().build());
+let schema = inputs[0].1.file_metadata().schema_descr().root_schema_ptr();
+let mut writer = SerializedFileWriter::new(output, schema, props)?;
+```
+while using the previous version of parquet crate.
+
+This snippet sets up a Parquet file writer with the following:
+
+Properties (props): Specifies settings like compression and encoding.
+Schema (schema): Defines the structure of the data.
+File Writer (writer): Prepares the output destination for writing Parquet data.
+This is typically the initialization step before writing rows of data into a Parquet file.
+
+Where
+WriterProperties:
+
+This object is used to configure properties for writing Parquet files.
+Common configurations include compression algorithms, encoding, and other optimizations.
+WriterProperties::builder() provides a builder pattern to customize these properties.
+Arc::new(...):
+
+Arc stands for Atomic Reference Counting, a smart pointer for shared ownership across threads.
+In this case, it ensures that the WriterProperties can be shared safely if multiple threads are involved.
+The Arc wraps the WriterProperties object so it can be accessed concurrently in a thread-safe manner.
+
+in `let schema = inputs[0].1.file_metadata().schema_descr().root_schema_ptr();`
+inputs:
+
+inputs seems to be a collection (likely a vector or similar structure) holding data or file-related information.
+Accessing inputs[0].1 implies the structure is a tuple (e.g., (x, y)) where the second element (1) holds Parquet metadata or file-related information.
+file_metadata():
+
+Retrieves metadata about the Parquet file, such as schema, row group details, and other properties.
+schema_descr():
+
+Returns a descriptor of the Parquet schema, which describes the structure of the data (columns, types, etc.).
+root_schema_ptr():
+
+Gets a pointer to the root schema of the Parquet file.
+This is required to define the structure of the output Parquet file.
+
+`let mut writer = SerializedFileWriter::new(output, schema, props)?;`
+SerializedFileWriter:
+
+A key component in the parquet crate for writing Parquet files.
+It handles the serialization of data into the Parquet file format.
+new:
+
+Creates a new instance of the file writer.
+Takes the following arguments:
+output: The output destination where the Parquet file will be written. This could be a file, stream, or buffer.
+schema: The schema descriptor (retrieved earlier) that defines the structure of the data being written.
+props: The writer properties (e.g., compression settings) defined earlier.
+?:
+
+The ? operator propagates errors if any occur during the creation of the file writer. If no errors occur, execution continues.
+
+Now we are using 
+1. Define the Path & get parquet_records of type CombinedOrderRecord
+```rust
+let path = "/tmp/combined_orders.parquet";
+let path_meta = <&str>::clone(&path);   let vector_for_schema = &parquet_records;
+let mut count = 0;
+
+let parquet_records: Vec<CombinedOrderRecord> = orders
+...
+;
+
+2. Get the Schema
+```rust
+let vector_for_schema = &parquet_records;
+let schema = vector_for_schema.as_slice().schema().unwrap();
+println!("{:?} schema", &schema);
+```
+
+3. Open File for Writing
+```rust
+let file = std::fs::File::create(path).unwrap();
+let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
+```
+std::fs::File::create(path):
+Opens the specified file for writing.
+Creates the file if it doesn't already exist.
+Panics on failure.
+SerializedFileWriter::new(file, schema, props()):
+Initializes a Parquet file writer.
+Takes the file, schema, and writer properties (props()) as inputs.
+props(): Presumably refers to writer properties like compression or encoding. If missing, it needs to be properly defined elsewhere.
+
+4. Write Data to the File
+```rust
+let mut row_group = pfile.next_row_group().unwrap();
+(&parquet_records[..])
+    .write_to_row_group(&mut row_group)
+    .expect("can't 'write_to_row_group' ...");
+pfile.close_row_group(row_group).unwrap();
+count += 1;
+println!("{} count", count);
+```
+
+pfile.next_row_group():
+Prepares the next row group for writing.
+Row groups are logical blocks of rows within a Parquet file.
+write_to_row_group:
+Serializes the parquet_records and writes them to the current row group.
+Panics with a custom error message if writing fails.
+pfile.close_row_group(row_group):
+Closes the row group after writing.
+count:
+Tracks the number of row groups written.
+This code increments and prints it.
+
+5.  Finalize the File
+`pfile.close().unwrap();`
+
+6.Read Metadata from the File
+
+```rust
+let reader = SerializedFileReader::try_from(path_meta).unwrap();
+let parquet_metadata = reader.metadata();
+let file_metadata = parquet_metadata.file_metadata();
+let rows_number = file_metadata.num_rows();
+(path.into(), rows_number)
+```
+SerializedFileReader::try_from(path_meta):
+Opens the written Parquet file for reading.
+Reads the file metadata for verification or further processing.
+file_metadata.num_rows():
+Retrieves the number of rows written to the file.
+(path.into(), rows_number):
+Returns the file path and the number of rows as the output of the task.
+
+
+parquet_records: A collection of records (of type CombinedOrderRecord) that you want to write to the Parquet file.
+vector_for_schema.as_slice(): Converts the Vec of records into a slice.
+schema(): Derives the schema from the slice. This step retrieves the structure of the data to define how it will be serialized into the Parquet format.
+unwrap(): Ensures that the schema extraction succeeds; if it doesn't, the program panics.
+println!: Prints the schema for debugging or informational purposes.
+
 
 Safe to Use Across Unwind Boundaries (`RefUnwindSafe and UnwindSafe`)
 What Are Unwind Boundaries?
