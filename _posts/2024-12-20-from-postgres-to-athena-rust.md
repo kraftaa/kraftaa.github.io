@@ -396,6 +396,211 @@ With similar logic I extract Tax object based on the corresponding `order_id` an
 
 _CombinedOrder_ combines fields from both tables and includes a derived field _amount_with_tax_.
 
+After I calculated all the fields, I'm collecting all data into the `Vec<CombinedOrderRecord>` via
+`collect()`
+The `.collect()` method collects all the `CombinedOrderRecord` instances into a new collection. The collection type depends on the type specified earlier in the chain. In this case, it’s a `Vec<CombinedOrderRecord>` as defined in:
+`let parquet_records: Vec<CombinedOrderRecord> = ...`
+
+After this collection I need to write the file into parquet format and upload to S3. 
+Here we come to the part: why we have `use super::prelude::*;` at the top of `combined_orders.rs` task.
+
+What it does:
+
+This imports all public items from the prelude module defined in the parent module (super).
+The * wildcard includes everything that is publicly available within the prelude module.
+Purpose:
+
+This is a common Rust pattern used to create a "prelude" module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.
+Example:
+
+In my prelude module, I have imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`, my `combined_orders.rs` file can directly use these items without specifying them individually.
+
+prelude mode looks like 
+
+<div class="code-container">
+
+  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs"></script>
+
+</div>
+
+which means I can use all public items from this module.
+Where
+The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name. Here's what it does:
+
+`function_name` Crate
+The `function_name` crate provides a procedural macro to retrieve the name of the current function at runtime in Rust. It is often used for logging, debugging, or tracing purposes.
+
+named Macro
+The named macro is a part of the function_name crate. It allows me to annotate a function so that I can programmatically access its name as a string during runtime.
+
+When I apply `#[named]` to a function, it makes the name of the function accessible via a special constant or variable, usually _function_name.
+I can then log or use the function's name directly.
+
+```rust
+use function_name::named;
+
+#[named]
+fn example_function() {
+    println!("Function name: {}", function_name!());
+}
+
+fn main() {
+    example_function();
+}
+```
+The prelude model is inside `mod.rs` file which is in 
+
+```shell
+project_tasks
+├── src
+   └── tasks 
+         ├── mod.rs
+         ├── combined_orders.rs
+         └── .. other tasks
+        
+└── Cargo.toml
+```
+In `mod.rs` I also have 
+```rust
+mod combined_orders; 
+pub use self::combined_orders::*;
+```
+What it does:
+
+`pub use self::combined_orders::*;` re-exports all public items from the combined_orders module, making them available to other parts of the codebase that import this parent module.
+Purpose:
+
+This pattern is often used in a module hierarchy to provide a clean interface to submodules by selectively exposing their contents.
+
+In addition I also have
+```rust
+pub trait ProjectTask: Sync + Send + RefUnwindSafe + UnwindSafe {
+fn run(&self, postgres_uri: &str) -> (String, i64);
+}
+```
+What it does:
+
+This defines a trait `ProjectTask` that any implementing type must satisfy.
+Types implementing ProjectTask must:
+Be thread-safe (Sync and Send).
+Be safe to use across unwind boundaries (RefUnwindSafe and UnwindSafe).
+Provide a run function with the specified signature, which takes a PostgreSQL connection string (postgres_uri) and returns a tuple (String, i64).
+Purpose:
+
+Traits like this are often used to define a shared interface for a family of tasks that can perform some operation (e.g., database processing) and return results.
+
+and
+```rust
+#[async_trait]
+pub trait ProjectStreamingTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
+async fn run(&self, postgres_uri: &str) -> (String, i64);
+}
+```
+What it does:
+
+Similar to ProjectTask, this defines a trait for asynchronous tasks.
+The #[async_trait] attribute allows the run function to be an async fn, enabling asynchronous operations within the trait implementation.
+Purpose:
+
+This trait is designed for streaming tasks that may involve asynchronous operations, such as reading data from a database, processing it, and returning results.
+Types implementing this trait must also be thread-safe and debug-friendly.
+
+
+More details about `Thread-Safe` (Sync and Send) traits:
+`Send Trait`
+A type that implements `Send` can safely be transferred between threads.
+For example, if a type is `Send`, it can be passed to a thread or moved into a thread pool for parallel execution.
+Most primitive types in Rust (like integers and String) are Send by default. However, types that contain raw pointers or manage non-thread-safe resources might not be.
+(Raw pointers in Rust are *const T (immutable) and *mut T (mutable). These are low-level constructs that provide direct memory access, similar to pointers in C or C++. Unlike Rust's references (&T and &mut T).
+Raw pointers: 
+Lack Safety Guarantees:
+
+They do not enforce borrow checking, lifetimes, or ownership rules.
+This means I can create dangling pointers, null pointers, or data races if not handled carefully.
+Use Cases:
+
+- Raw pointers are typically used in unsafe code for advanced scenarios, such as:
+- Interfacing with C code.
+- Optimizing performance when known that the operations are safe.
+- Implementing custom data structures or memory allocators.)
+Example:
+```rust
+let x = 1;
+let raw_ptr: *const i32 = &x;
+
+unsafe {
+    println!("Value at raw pointer: {}", *raw_ptr); // Unsafe block is required
+}
+```
+
+Non-Thread-Safe Resources
+Non-thread-safe resources are types or constructs that cannot safely be shared or accessed by multiple threads simultaneously. These might include:
+
+Rc<T> (Reference Counted Smart Pointer)
+Rc<T> provides shared ownership of a value but is not thread-safe because it doesn’t use atomic operations to manage the reference count.
+Instead, Arc<T> (atomic reference counter) is used for thread-safe shared ownership.
+
+Example:
+```rust
+
+```
+`Sync Trait`
+A type that implements `Sync` can safely be shared between threads by reference.
+For example, if `T` is `Sync`, then `&T` (a shared reference to `T`) can be accessed by multiple threads simultaneously without issues.
+This requires that the type guarantees no race conditions or undefined behavior, even when accessed concurrently by multiple threads.
+Thread-Safety in Practice
+Types that implement both Sync and Send are considered thread-safe in Rust. This ensures that the type can be used safely in multi-threaded environments.
+Example:
+```rust
+use std::sync::Arc;
+use std::thread;
+
+let data = Arc::new(vec![1, 2, 3]); // `Arc` is thread-safe
+let data_clone = Arc::clone(&data);
+
+thread::spawn(move || {
+    println!("{:?}", data_clone); // Safe because `Arc` is `Sync` and `Send`
+}).join().unwrap();
+```
+
+Safe to Use Across Unwind Boundaries (`RefUnwindSafe and UnwindSafe`)
+What Are Unwind Boundaries?
+In Rust, an unwind occurs when a panic happens and the program starts cleaning up by dropping variables and freeing resources.
+Code that interacts with panics must ensure that resources are safely released and that the program can recover or terminate gracefully.
+UnwindSafe Trait
+A type that implements UnwindSafe ensures that it remains in a valid state if a panic occurs while the type is being accessed or used.
+For example, a struct that only contains primitive types or safe abstractions like String will be UnwindSafe.
+RefUnwindSafe Trait
+A type that implements RefUnwindSafe guarantees that it can be safely accessed through a reference (&T) across an unwind boundary.
+This is a stricter guarantee than UnwindSafe because it deals with shared references.
+Practical Use of Unwind Safety
+These traits are mainly used in scenarios where panics can happen but the program intends to recover gracefully, such as in:
+std::panic::catch_unwind: A function that allows catching panics and continuing execution.
+```rust
+use std::panic;
+
+let result = panic::catch_unwind(|| {
+    println!("Before panic");
+    panic!("Oops!");
+});
+
+match result {
+    Ok(_) => println!("Code ran successfully"),
+    Err(_) => println!("Caught a panic"),
+}
+```
+Summary
+`Thread-Safety (Sync and Send)`:
+
+Ensures a type can be safely transferred (Send) or shared (Sync) between threads without causing race conditions or undefined behavior.
+Important for concurrent or parallel processing.
+
+`Unwind Safety (RefUnwindSafe and UnwindSafe)`:
+
+Ensures a type can be safely accessed or manipulated across panic boundaries.
+Important for error handling and maintaining program integrity during panics.
+By combining these guarantees, Rust ensures memory safety, thread safety, and robustness in concurrent and error-prone code.
+
 This structured approach made the code cleaner and easier to maintain.
 
 ## ETL Workflow
