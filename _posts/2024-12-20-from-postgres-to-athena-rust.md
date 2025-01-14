@@ -53,10 +53,10 @@ AWSAthena -->|Used in| Reports[Reports];
 
 
 
-Instead of performing everything within Postgres, I built an ETL pipeline with Rust, AWS S3, GLue and Athena.
+Instead of performing everything within Postgres, we built an ETL pipeline with Rust, AWS S3, GLue and Athena.
 
 
-Thes Rust project was originally initiated by my colleague and Rust wizard, [Xavier](https://github.com/xrl). His guidance and expertise helped me not only get started with Rust but also truly appreciate its beauty, power, and advantages. Thanks to his mentorship, I’ve come to love working with Rust and have seen firsthand how it can transform complex workflows (or make it even more complex but very fast :smile: ) .
+This Rust project was originally initiated by my colleague and Rust wizard, [Xavier](https://github.com/xrl). His guidance and expertise helped me not only get started with Rust but also truly appreciate its beauty, power, and advantages. Thanks to his mentorship, I’ve come to love working with Rust and have seen firsthand how it can transform complex workflows (or make it even more complex but blazing fast :wink: ) .
 
 
 Here’s how it worked:
@@ -71,7 +71,7 @@ Using Rust allowed me to optimize performance and maintain type safety by repres
 Rust's type-checking served as a robust safeguard for ensuring the integrity of production data. If the production system encountered any invalid values or NaNs, the Rust process would immediately detect the issue and send an error notification, helping to maintain data accuracy and reliability.
 
 
-The Rust program was deployed in a Kubernetes environment using a Helm chart. The chart configured a service account with the appropriate role-based access to AWS services, including S3 and Glue. Additionally, the Helm chart utilized a Kubernetes secret to securely manage the connection credentials for the RDS instance, ensuring secure and efficient integration with the necessary resources.
+The Rust program was deployed in a Kubernetes environment using a Helm chart. The chart configured a service account with the appropriate role-based access to AWS services, including S3 and Glue. Additionally, the Helm chart utilized a Kubernetes secret to securely manage the connection credentials for the RDS instance.
 
 
 Parquet Files on S3:
@@ -87,7 +87,7 @@ AWS Glue was used to crawl the Parquet files on S3 and create metadata.
 
 Athena provided a cost-efficient way to query the data using SQL. Bear in mind that Athena doesn't create real tables or materialized views, it only creates a metadata and reads everything from the file, stored in S3.
 The reports leveraged Athena tables and views as the foundation for data visualization.
-The cons of such approach is that it's possible to delete underlying file without getting any warnings/restrictions about dependant views, tables etc.
+The cons of such approach ate that it is possible to delete underlying file without getting any warnings/restrictions about dependant views, tables etc.
 Athena also doesn't provide indexing as it's just a querying tool. It also doesn't support ***CREATE TABLE LIKE*** or ***DELETE FROM*** or ***UPDATE***, but it allows to give an access to query a table without a fear that the table would be dropped as behind a hood it's a file in s3.
 AWS Glue provides a mechanism for partitioning and indexing with the limitations: 
 - only partition column could be used as an index
@@ -95,31 +95,25 @@ AWS Glue provides a mechanism for partitioning and indexing with the limitations
 
 
 
-Rust program had the next structure:
-
-
-- project_aws
-
-- project_cli
-
-- project_kube
-
-- project_extra_source
-
-- project_insert_data
-
-- project_parquet
-
-- project_schemas
-
-- project_tasks
-
-- project_partition_dates    
-
+Rust program workspace had the next members:
+```rust
+[workspace]
+members = [
+  "project_aws",
+  "project_cli",
+  "project_extra_source"
+  "project_insert_data"
+  "project_kube",
+  "project_parquet",
+  "project_schemas",
+  "project_tasks",
+  "project_partition_dates"
+]
+```
 
 Why this project structure?
 
-It was designed to allow for the separation of tasks and crates in Cargo.toml. This separation enabled me to build and manage each component independently, avoiding unnecessary complexity and performance bottlenecks. It also provided better visibility into the performance of individual areas, making it easier to track and optimize each part of the system.
+It was designed to allow for the separation of tasks and crates in Cargo.toml. This separation enabled me to build and manage each component independently, avoiding unnecessary complexity and loading all the crates in once, each . It also provided better visibility into the performance of individual areas, making it easier to track and optimize and fix each part of the system.
 
 
 #### Struct/Table Representation in Rust are in **_project_schemas_**
