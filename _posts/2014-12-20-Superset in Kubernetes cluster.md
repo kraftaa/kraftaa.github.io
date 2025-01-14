@@ -5,8 +5,8 @@ date: 2024-12-17
 img: superset.png
 tags: [Kubernetes, Superset]
 ---
-
-! Coming soon. !
+_Work in progress_
+&nbsp;
 
 ## Problem:
 Need to run reporting software in Kubernetes cluster with many complicated reports and visualization.

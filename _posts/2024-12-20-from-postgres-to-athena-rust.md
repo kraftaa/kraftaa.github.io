@@ -5,23 +5,20 @@ date: 2024-12-17
 img: rust3.png
 tags: [Rust, AWS, S3, Postgres]
 ---
-
-
-! Work in progress, many additions coming !
-
+_Work in progress_
+&nbsp;
 
 ## Problem:
 
 This project began several years ago as a solution to a pressing need for providing data for company reporting in the absence of an established ETL process. The production data resided in a Postgres RDS database, but generating reports directly from 
 the primary instance was not feasible. Doing so would have imposed additional load on the main application and required additional roles to handle live production data.
 
-
-Moreover, we needed to perform complex computations and aggregations and store the processed results for subsequent use in reporting. While Postgres excels at handling transactional workloads, it posed significant challenges when tasked with heavy computations, aggregations, and data enrichment.
+Moreover, we needed to perform complex computations and aggregations and store the processed results for subsequent use in reporting. While Postgres excels at handling transactional workloads, it posed some challenges when tasked with heavy computations and data enrichment.
 
 
 ## Security Concerns:
 
-I didn’t want to give direct access to the Postgres RDS instance to other services or users. Instead, I wanted a secure and controlled way to read data, transform it, and expose only selected results. Access was restricted to calls made only via a program (like an API call) for security.
+I did not want to give direct access to the Postgres RDS instance to other services or users. Instead, I wanted a secure and controlled way to read data, transform it, and expose only selected results. Access was restricted to calls made only via a program (like an API call) for security.
 
 
 ## Performance Issues:
@@ -41,28 +38,19 @@ Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) pro
 
 # The Solution: ETL with Rust + Parquet + S3 + Glue + Athena
 
+{% mermaid %}
+graph TD;
+RustProgram[Rust Program] -->|Reads| PostgresRDS[PostgreSQL RDS];
+RustProgram -->|Calculates & Aggregates| S3ParquetFiles[S3 Parquet Files];
+AWS_GLUE[AWS Glue Crawler]-->|Crawls & Creates Schema| S3ParquetFiles[S3 Parquet Files];
+S3ParquetFiles[S3 Parquet Files] -->|Tables via Glue Schema| AWSAthena[AWS Athena];
+AWSAthena -->|Used in| Reports[Reports];
 
-![AWS Glue]({{site.baseurl}}/assets/img/glue.jpeg)
+    %% Adding styles for clarity
+    classDef process fill:#f9f,stroke:#333,stroke-width:2px;
+    class RustProgram,PostgresRDS,S3ParquetFiles,AWS_GLUE,AWSAthena,Reports process;
+{% endmermaid %}
 
-<div style="display: flex; align-items: center; gap: 10px;">
-
-
-  <img src="{{site.baseurl}}/assets/img/kube.png" alt="Kubernetes" style="height: 100px;">
-
-
-  <img src="{{site.baseurl}}/assets/img/rust1.png" alt="Rust" style="height: 100px;">
-
-
-  <img src="{{site.baseurl}}/assets/img/s3.png" alt="AWS S3" style="height: 100px;">
-
-
-  <img src="{{site.baseurl}}/assets/img/glue.jpeg" alt="AWS Glue" style="height: 100px;">
-
-
-  <img src="{{site.baseurl}}/assets/img/athena.png" alt="AWS Athena" style="height: 100px;">
-
-
-</div>
 
 
 Instead of performing everything within Postgres, I built an ETL pipeline with Rust, AWS S3, GLue and Athena.
@@ -200,12 +188,6 @@ Makefile
   <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=create_model.rs"></script>
 
 </div>
-
-
-Test
-
-<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=create_model.rs"></script>
-
 
 This approach saved considerable time and reduced the chance of errors with types/nullables by automating the mapping process.
 
