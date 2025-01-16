@@ -118,7 +118,7 @@ It was designed to allow for the separation of tasks and crates in Cargo.toml. T
 
 #### Struct/Table Representation in Rust are in **_project_schemas_**
 
-In order to read the tables and perform some calculations and also to ensure type safety  I had to map each Postgres table to a corresponding Rust struct. Initially, this mapping was done manually, but later I discovered the powerful _**diesel_ext**_ crate (later _**diesel_cli_ext**_), which allowed me to automatically map the schema from Postgres to Rust structs. I still had to create diesel _table!_ macro definition which was done with the help of _bash_ script:
+In order to read the tables and perform some calculations and also to ensure type safety  I had to map each Postgres table to a corresponding Rust struct. Initially, this mapping was done manually, but later I discovered the powerful _**diesel_ext**_ crate (later [_**diesel_cli_ext**_](https://crates.io/crates/diesel_cli_ext)), which allowed me to automatically map the schema from Postgres to Rust structs. I still had to create diesel _table!_ macro definition which I automate with the help of _bash_ script:
 
 ```commandline
 SELECT column_name, data_type, is_nullable
@@ -136,7 +136,7 @@ which was giving me
  data                            | jsonb                       | YES
  ...
 ```
-which together with a bash script would give diesel _table!_ macro definition:
+which together with this bash script would give diesel _table!_ macro definition:
 <div class="code-container">
 
   <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=table_macro.sh"></script>
@@ -227,10 +227,12 @@ project_schemas
 ├── tables
 └── models
 ```
+Now I had to combine all the data, add some calculations, write the result into parquet file and upload to S3 into the designated busket/folder.
 
 <div class="code-container">
     <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs"></script>
 </div>
+
 
 Here:
 
@@ -238,7 +240,7 @@ _Order_ and _User_ represent the tables fetched from Postgres.
 ```shell
 let products = products_dsl::products.load::<Product>(&conn).unwrap();
 ```
-is part of a query using _Diesel_, an _ORM (Object-Relational Mapper)_ library for interacting with databases in Rust.
+is part of a query using _Diesel_, an _ORM (Object-Relational Mapper)_ library for interacting with databases in Rust, which allows to interact with a relational database using the programming language's objects instead of writing raw SQL queries.
 This line brings into scope the _DSLs (Domain-Specific Languages)_ for interacting with tables in the database. Diesel uses DSLs to generate SQL queries and map the results to Rust types. The products::dsl, orders::dsl, and users::dsl refer to the tables orders, users, and products respectively, and I'm giving them aliases (orders_dsl, users_dsl, products_dsl) for convenience.
 _products_dsl::products_
 
@@ -401,7 +403,10 @@ prelude mode looks like
 
 which means I can use all public items from this module.
 Where
-The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name. Here's what it does:
+The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name. 
+My idea was to use it for generating a file name on the fly (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function at runtime.
+
+In theory, what it does:
 
 `function_name` Crate
 The `function_name` crate provides a procedural macro to retrieve the name of the current function at runtime in Rust. It is often used for logging, debugging, or tracing purposes.
