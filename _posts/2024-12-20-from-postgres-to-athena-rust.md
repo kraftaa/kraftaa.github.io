@@ -227,24 +227,139 @@ project_schemas
 ├── tables
 └── models
 ```
-Now I had to combine all the data, add some calculations, write the result into parquet file and upload to S3 into the designated busket/folder.
+Then I had to combine all the data, add some calculations, write the result into parquet file and upload to S3 into the designated busket/folder.
 
-<div class="code-container">
-    <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs"></script>
-</div>
+[//]: # ()
+[//]: # (<div class="code-container">)
 
+[//]: # ()
+[//]: # (    <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs"></script>)
 
+[//]: # ()
+[//]: # (</div>)
+
+[//]: # ()
+
+First we need to bring modules and structs into the scope of our `combined_orders.rs` task.
+
+```rust
+use super::prelude::*;
+use std::collections::HashMap;
+
+use project_schemas::tables::{
+    orders::dsl as orders_dsl, users::dsl as users_dsl, products::dsl as products_dsl,
+    currencies::dsl as currencies_dsl, taxes::dsl as taxes,
+};
+```
+
+What `use super::prelude::*;` does:
+
+This imports all public items from the prelude module defined in the parent module (super).
+The `*` wildcard includes everything that is publicly available within the prelude module.
+
+Purpose:
+This is a common Rust pattern used to create a "prelude" module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.
+Example:
+
+In the prelude module, I have imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`,  `combined_orders.rs` file can directly use these items without specifying them individually.
+
+The full [prelude](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs) mode.
+
+[//]: # ()
+[//]: # (<div class="code-container">)
+
+[//]: # ()
+[//]: # (  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs"></script>)
+
+[//]: # ()
+[//]: # (</div>)
+
+which means I can use all public items from this module.
+Where
+The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name.
+My idea was to use it for generating a file name on the fly (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function at runtime.
+
+In theory, what it does:
+
+`function_name` Crate
+The `function_name` crate provides a procedural macro to retrieve the name of the current function at runtime in Rust. It is often used for logging, debugging, or tracing purposes.
+
+`named Macro`
+The named macro is a part of the `function_name` crate. It allows to annotate a function so that I can programmatically access its name as a string.
+
+When I apply `#[named]` to a function, it makes the name of the function accessible via a special constant or variable, usually _function_name_.
+I can then log or use the function's name directly.
+
+```rust
+use function_name::named;
+
+#[named]
+fn example_function() {
+    println!("Function name: {}", function_name!());
+}
+
+fn main() {
+    example_function();
+}
+```
+
+then I have 
+```rust
+use std::collections::HashMap;
+```
+Which imports the HashMap type from the Rust standard library (std::collections) into scope.
+
+```rust
+use project_schemas::tables::{ ... };
+```
+This line imports specific modules from `project_schemas::tables` module, and it includes additional scoping and aliasing functionality.
+
+What Happens Here:
+`orders::dsl as orders_dsl`: Imports the dsl module from `project_schemas::tables::orders` and renames (aliases) it as orders_dsl. I can now use it as `orders_dsl` throughout the file.
+`dsl` stands for `domain-specific language`, which is a set of helper types, methods, or macros to construct SQL queries using the Diesel ORM library for working with tables and columns in our postgres database.
+
+Definining the struct for the output file:
+```rust
+#[derive(ParquetRecordWriter)]
+struct CombinedOrderRecord {
+    order_id: i32,
+    user_id: i32,
+    user_name: String,
+    country: String,
+    amount: f64,
+    amount_usd: f64;
+    amount_with_tax: f64,
+    created_at: Option<NaiveDateTime>,
+}
+```
+Here `#[derive(ParquetRecordWriter)]` that tells the Rust compiler to automatically implement the trait `ParquetRecordWriter` for the struct `CombinedOrderRecord`. 
+
+The `ParquetRecordWriter` trait is a part of an external library `parquet_derive` which implements ``#[proc_macro_derive(ParquetRecordWriter)]`  which defines a procedural macro that will be triggered by the #[derive(ParquetRecordWriter)] attribute applied to a struct or enum.
+It will handle the input, fields/types and write the struct to a file in Parquet's binary format.
+
+Then I have the task itself which is public `pub` which means it can't be called outside of the module,
+the task takes as input a reference to a string (`&str`), representing PostgreSQL connection URI,  and returns a tuple of String and bigint.
+The full task code is located [combined_orders.rs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs)
+
+```rust
+pub fn combined_orders(pg_uri: &str) -> (String, i64) {
+    let conn = PgConnection::establish(pg_uri).unwrap();
+    let products_load = Instant::now();
+    let products = products_dsl::products.load::<Product>(&conn).unwrap();
+    trace!("load products took: {:?}", products_load.elapsed());
+```
 Here:
 
-_Order_ and _User_ represent the tables fetched from Postgres.
+[//]: # (_Order_, _User_, _Product_, _Currency_ and  _Tax_ represent the tables fetched from Postgres.)
 ```shell
 let products = products_dsl::products.load::<Product>(&conn).unwrap();
 ```
 is part of a query using _Diesel_, an _ORM (Object-Relational Mapper)_ library for interacting with databases in Rust, which allows to interact with a relational database using the programming language's objects instead of writing raw SQL queries.
-This line brings into scope the _DSLs (Domain-Specific Languages)_ for interacting with tables in the database. Diesel uses DSLs to generate SQL queries and map the results to Rust types. The products::dsl, orders::dsl, and users::dsl refer to the tables orders, users, and products respectively, and I'm giving them aliases (orders_dsl, users_dsl, products_dsl) for convenience.
+This line brings into scope the _DSLs (Domain-Specific Languages)_ for interacting with tables in the database. Diesel uses DSLs to generate SQL queries and map the results to Rust types. The _products::dsl, orders::dsl_ etc refer to the corresponding tables, and I'm giving them aliases (orders_dsl, users_dsl, ...) for convenience.
+
 _products_dsl::products_
 
-_products_dsl_ is the alias I created for _products::dsl_. _Diesel_ automatically generates a _products_ variable (referring to the products table in the database) within this DSL module, which represents the table in the database.
+_products_dsl_ is the alias created for _products::dsl_. _Diesel_ automatically generates a _products_ variable (referring to the products table in the database) within this DSL module, which represents the table in the database.
 
 ``.load::<Product>()`` is a Diesel method used to execute the query and load the results into a collection of Rust structs `Vec<Product>`.
 
@@ -380,55 +495,89 @@ The `.collect()` method collects all the `CombinedOrderRecord` instances into a 
 `let parquet_records: Vec<CombinedOrderRecord> = ...`
 
 After this collection I need to write the file into parquet format and upload to S3. 
-Here we come to the part: why we have `use super::prelude::*;` at the top of `combined_orders.rs` task.
 
-What it does:
+[//]: # (Here we come to the part: why we have `use super::prelude::*;` at the top of `combined_orders.rs` task.)
 
-This imports all public items from the prelude module defined in the parent module (super).
-The * wildcard includes everything that is publicly available within the prelude module.
-Purpose:
+[//]: # ()
+[//]: # (What it does:)
 
-This is a common Rust pattern used to create a "prelude" module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.
-Example:
+[//]: # ()
+[//]: # (This imports all public items from the prelude module defined in the parent module &#40;super&#41;.)
 
-In my prelude module, I have imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`, my `combined_orders.rs` file can directly use these items without specifying them individually.
+[//]: # (The * wildcard includes everything that is publicly available within the prelude module.)
 
-prelude mode looks like 
+[//]: # (Purpose:)
 
-<div class="code-container">
+[//]: # ()
+[//]: # (This is a common Rust pattern used to create a "prelude" module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.)
 
-  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs"></script>
+[//]: # (Example:)
 
-</div>
+[//]: # ()
+[//]: # (In my prelude module, I have imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`, my `combined_orders.rs` file can directly use these items without specifying them individually.)
 
-which means I can use all public items from this module.
-Where
-The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name. 
-My idea was to use it for generating a file name on the fly (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function at runtime.
+[//]: # ()
+[//]: # (prelude mode looks like )
 
-In theory, what it does:
+[//]: # ()
+[//]: # (<div class="code-container">)
 
-`function_name` Crate
-The `function_name` crate provides a procedural macro to retrieve the name of the current function at runtime in Rust. It is often used for logging, debugging, or tracing purposes.
+[//]: # ()
+[//]: # (  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs"></script>)
 
-named Macro
-The named macro is a part of the function_name crate. It allows me to annotate a function so that I can programmatically access its name as a string during runtime.
+[//]: # ()
+[//]: # (</div>)
 
-When I apply `#[named]` to a function, it makes the name of the function accessible via a special constant or variable, usually _function_name.
-I can then log or use the function's name directly.
+[//]: # ()
+[//]: # (which means I can use all public items from this module.)
 
-```rust
-use function_name::named;
+[//]: # (Where)
 
-#[named]
-fn example_function() {
-    println!("Function name: {}", function_name!());
-}
+[//]: # (The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name. )
 
-fn main() {
-    example_function();
-}
-```
+[//]: # (My idea was to use it for generating a file name on the fly &#40;it was at the beginning of my Rust journey&#41; however, `use` cannot be used to dynamically retrieve the name of a function at runtime.)
+
+[//]: # ()
+[//]: # (In theory, what it does:)
+
+[//]: # ()
+[//]: # (`function_name` Crate)
+
+[//]: # (The `function_name` crate provides a procedural macro to retrieve the name of the current function at runtime in Rust. It is often used for logging, debugging, or tracing purposes.)
+
+[//]: # ()
+[//]: # (named Macro)
+
+[//]: # (The named macro is a part of the function_name crate. It allows me to annotate a function so that I can programmatically access its name as a string during runtime.)
+
+[//]: # ()
+[//]: # (When I apply `#[named]` to a function, it makes the name of the function accessible via a special constant or variable, usually _function_name.)
+
+[//]: # (I can then log or use the function's name directly.)
+
+[//]: # ()
+[//]: # (```rust)
+
+[//]: # (use function_name::named;)
+
+[//]: # ()
+[//]: # (#[named])
+
+[//]: # (fn example_function&#40;&#41; {)
+
+[//]: # (    println!&#40;"Function name: {}", function_name!&#40;&#41;&#41;;)
+
+[//]: # (})
+
+[//]: # ()
+[//]: # (fn main&#40;&#41; {)
+
+[//]: # (    example_function&#40;&#41;;)
+
+[//]: # (})
+
+[//]: # (```)
+
 The prelude model is inside `mod.rs` file which is in 
 
 ```shell
