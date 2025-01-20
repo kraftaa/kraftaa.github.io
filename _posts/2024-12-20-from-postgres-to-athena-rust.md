@@ -255,15 +255,14 @@ use project_schemas::tables::{
 What `use super::prelude::*;` does:
 
 This imports all public items from the prelude module defined in the parent module (super).
-The `*` wildcard includes everything that is publicly available within the prelude module.
+The `*` wildcard includes everything that is publicly available within the `prelude` module.
 
-Purpose:
-This is a common Rust pattern used to create a "prelude" module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.
+This is a common Rust pattern used to create a `prelude` module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.
 Example:
 
 In the prelude module, I have imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`,  `combined_orders.rs` file can directly use these items without specifying them individually.
 
-The full [prelude](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs) mode.
+The full [prelude](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs) code.
 
 [//]: # ()
 [//]: # (<div class="code-container">)
@@ -277,7 +276,7 @@ The full [prelude](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a
 which means I can use all public items from this module.
 Where
 The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name.
-My idea was to use it for generating a file name on the fly (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function at runtime.
+My idea was to use it for ge nerating a file name on the fly (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function at runtime.
 
 In theory, what it does:
 
@@ -318,7 +317,7 @@ What Happens Here:
 `orders::dsl as orders_dsl`: Imports the dsl module from `project_schemas::tables::orders` and renames (aliases) it as orders_dsl. I can now use it as `orders_dsl` throughout the file.
 `dsl` stands for `domain-specific language`, which is a set of helper types, methods, or macros to construct SQL queries using the Diesel ORM library for working with tables and columns in our postgres database.
 
-Definining the struct for the output file:
+Defining the struct for the output file:
 ```rust
 #[derive(ParquetRecordWriter)]
 struct CombinedOrderRecord {
@@ -337,9 +336,9 @@ Here `#[derive(ParquetRecordWriter)]` that tells the Rust compiler to automatica
 The `ParquetRecordWriter` trait is a part of an external library `parquet_derive` which implements ``#[proc_macro_derive(ParquetRecordWriter)]`  which defines a procedural macro that will be triggered by the #[derive(ParquetRecordWriter)] attribute applied to a struct or enum.
 It will handle the input, fields/types and write the struct to a file in Parquet's binary format.
 
-Then I have the task itself which is public `pub` which means it can't be called outside of the module,
+Then there is the task itself, `pub` which means it can be called outside the module,
 the task takes as input a reference to a string (`&str`), representing PostgreSQL connection URI,  and returns a tuple of String and bigint.
-The full task code is located [combined_orders.rs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs)
+The full task code is [combined_orders.rs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs)
 
 ```rust
 pub fn combined_orders(pg_uri: &str) -> (String, i64) {
@@ -368,8 +367,8 @@ _Product_ is a _Rust_ struct representing the schema of the products table (i.e.
 _&conn_ is a reference to a database connection, which is used to execute the query against the database. This connection is established using Diesel’s connection API (e.g., _PgConnection_ for PostgreSQL).
 
 _.unwrap()_ is used to unwrap the _Result_ returned by ``load::<Product>()``. This method will either return the query results (if successful) or panic if there was an error.
-Usually it is discouraged to use `unwrap` in production code unless I am  certain that the query will succeed, as it causes the program to panic on an error.
-We were using `unwrap` as wanted the program to panic and stop running, which will give us a clear sign that the data is not updated.
+Usually it is discouraged to use `unwrap` in production code unless I am certain that the query will succeed, as it causes the program to panic on an error.
+We were using `unwrap` as wanted the program to panic and stop running, which will give us a clear sign that the data was not updated.
 If I implemented it now I will rather use `expect` with the custom message but keep the panicking behaviour.
 ```shell
 let products = products_dsl::products
@@ -402,15 +401,15 @@ Usually the `panic!()` was caused by changes in the underlying Postgres tables, 
 In that case running the task further which was loading this table didn't make sense hence `panic!()` behaviour was justified.
 
 
-I wanted to see how long it takes to load some tables, for that I have
+I wanted to see how long it takes to load some tables, for that I had
 ```rust
     let users_load = Instant::now();
     let users = users_dsl::users.load::<User>(&conn).unwrap();
     trace!("load users took: {:?}", users_load.elapsed());
 ```
-where `Instant::now()` creates a new Instant that represents the current time, essentially starting a stopwatch.
-`trace!` lane logs the time taken to execute the query and to load the table users from the database. It uses the trace! macro, which is typically used for logging at a fine-grained level (very detailed). The elapsed() duration is formatted and printed to show how long the query took to execute.
-The elapsed() method in Rust returns a Duration object, which represents the amount of time that has passed since the Instant was created. The unit of time in Duration is typically in nanoseconds (ns).
+where _**Instant::now()**_ creates a new Instant that represents the current time, essentially starting a stopwatch.
+_**trace!**_ lane logs the time taken to execute the query and to load the table users from the database. It uses the trace! macro, which is typically used for logging at a fine-grained level (very detailed). The elapsed() duration is formatted and printed to show how long the query took to execute.
+The _**elapsed()**_ method in Rust returns a _**Duration**_ object, which represents the amount of time that has passed since the Instant was created. The unit of time in _**Duration**_ is typically in nanoseconds (ns).
 This information could be useful for monitoring and optimization.
 The duration could be converted to different units as 
 ```rust
@@ -419,7 +418,7 @@ println!("Elapsed time in seconds: {:?}", users_load.as_secs());
 println!("Elapsed time in microseconds: {:?}", users_load.as_micros());
 ```
 
-I want to collect all users ids and also all product ids from the users table
+I want to collect all **_users_** ids and also all **_orders_** ids from the **_users_** table
 ```rust
 let users_ids: Vec<i32> = users.iter().map(|x| x.id).collect();
 trace!("{:?}", users_ids.len());
@@ -427,17 +426,24 @@ let order_ids: Vec<i32> = users.iter().filter_map(|x| x.order_id).collect();
 ```
 `.map(|x| x.id)` takes every users record, extract value from the field `id` and collects them into a vector if integers `Vec<i32>`.
 
-`users.iter().filter_map(|x| x.order_id).collect();` creates a vector (order_ids) that contains the order_id field of each user from the users vector, but only if order_id is Some(i32). The filter_map function filters out None values and collects only Some(i32) values into the vector. This results in a list of order_ids from users.
+`users.iter().filter_map(|x| x.order_id).collect();`
+
+`users.iter()` creates an iterator over the users vector, producing references to each User object, without consuming the collection.
+
+`.filter_map(|x| x.order_id).collect()` creates a vector (order_ids) that contains the order_id field of each user from the users vector, but only if order_id is Some(i32). The filter_map function filters out None values and collects only Some(i32) values into the vector. This results in a list of order_ids from users.
 
 I want to get currency, corresponding with the product_id so for that I load currencies table, filtering it by two fields: `type` and `type_id`
-
-`users.iter()`
-
-Creates an iterator over the users vector, producing references to each User object.
+```rust
+let currencies: Vec<Currency> = currencies_dsl::currencies
+        .filter(currencies_dsl::type.eq("Product"))
+        .filter(currencies_dsl::type_id.eq(any(&products_ids[..])))
+        .load::<Currency>(&conn)
+        .unwrap();
+```
 `.filter(currencies_dsl::type.eq("Order"))`
 Filters the currencies table to only include rows where the type column is equal to "Order".
 `.filter(currencies_dsl::type_id.eq(any(&order_ids[..])))`
-Filters the currencies table to only include rows where the type_id column matches one of the order_ids from the users table.
+Filters the currencies table to only include rows where the type_id column matches one of the order_ids collected from the users table.
 
 Now I want to have a HashMap where keys are `order_id` and the values are references to the corresponding Currency objects.
 
@@ -469,16 +475,40 @@ Values of type &Currency, which are references to the Currency objects.
 
 Which creates kind of lookup table, when I can pass a key (type_id = order_id in our case) and get a corresponding Currency object with all the fields.
 
+```rust
+    let mut count = 0;
+    let path = "/tmp/combined_orders.parquet";
+    let path_meta = <&str>::clone(&path);
+```
+Before starting the collection of all the data I define the path/name of the future parquet file I'm going to write data into.
+`let path_meta = <&str>::clone(&path);` is needed as I wanted to extract metadata of the file, and for that I needed to clone `path` value and pass it further as the reference (why can't I just use a reference - check the logic).
 _CombinedOrder_ combines fields from both tables and includes a derived field _amount_usd_ using the information from currencies table and _amount_with_tax_ using the information from taxes table.
 
+```rust
+    let parquet_records: Vec<CombinedOrderRecord> = orders
+        .iter()
+        .filter(|order| order.user_id.is_some())
+        .filter(|order| order.active)
+        .map(|o| {
+```
 `orders.iter().filter(|order| order.user_id.is_some())` filters out orders where the user_id is None. This ensures only orders associated with a user are processed further.
 
 The `.map(|o| { ... })` transforms each filtered order (o) into a new representation, producing a `CombinedOrderRecord`.
 `let currency = currencies_by_order_id_id.get(&o.id)` retrieves the currency information for the current order from the `currencies_by_order_id_id` `HashMap` mapping described above, using the order's id as a key. If no entry exists, currency is None.
-`let conversion_rate = ...` extracts the conversion rate from the currency (if it exists). 
+```rust
+let conversion_rate = currency
+    .map(|x| {
+    x.conversion_rate
+    .clone()
+    .map(|cr| cr.to_f64().expect("bigdecimal to f64"))
+    .expect("Unwrapping currency in Orders")
+    })
+    .unwrap_or(1.0);
+```
+extracts the conversion rate from the currency (if it exists). 
 The logic:
 `currency.map(|x| ...)` operates on the optional currency object.
-If a currency exists, its `conversion_rate` is cloned and converted to an f64. 
+If a currency exists, its `conversion_rate` is cloned and converted to a **_f64_**. 
 If this fails, an `expect` statement ensures a panic with an error message.
 If no currency exists (`currency.is_none()`), a default conversion rate of `1.0` is used via `.unwrap_or(1.0)`.
 `let currency_name = ...` uses the same logic:
@@ -488,10 +518,11 @@ With similar logic I extract Tax object based on the corresponding `order_id` an
 
 
 _CombinedOrder_ combines fields from both tables and includes a derived field _amount_with_tax_.
+`order.amount * (1.0 + tax_rate),`
 
-After I calculated all the fields, I'm collecting all data into the `Vec<CombinedOrderRecord>` via
+After all the fields are calculated, they are collected into the `Vec<CombinedOrderRecord>` via
 `collect()`
-The `.collect()` method collects all the `CombinedOrderRecord` instances into a new collection. The collection type depends on the type specified earlier in the chain. In this case, it’s a `Vec<CombinedOrderRecord>` as defined in:
+The `.collect()` method collects all the `CombinedOrderRecord` instances into a new collection. The collection type depends on the type specified earlier in:
 `let parquet_records: Vec<CombinedOrderRecord> = ...`
 
 After this collection I need to write the file into parquet format and upload to S3. 
