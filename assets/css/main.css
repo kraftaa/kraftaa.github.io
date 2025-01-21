@@ -1524,3 +1524,37 @@ a.newer-posts:hover {
     max-width: 90%; /* Prevent the iframe from overflowing */
   }
 }
+
+details p {
+  font-size: 16px;
+}
+
+details em {
+  font-style: italic;
+}
+
+details strong {
+  font-weight: bold;
+}
+
+/*.highlight {*/
+/*  background-color: #f6f8fa;  !* Light gray background *!*/
+/*  border-left: 4px solid #3572A5;  !* Blue border to indicate Rust code *!*/
+/*  padding: 10px;*/
+/*  font-family: "Courier New", Courier, monospace;*/
+/*  font-size: 14px;*/
+/*  overflow-x: auto;*/
+/*}*/
+
+/*.highlight-source-rust::before {*/
+/*  !*content: "Rust Code:";*!*/
+/*  font-weight: bold;*/
+/*  color: #3572A5;*/
+/*  display: block;*/
+/*  margin-bottom: 5px;*/
+/*}*/
+
+pre {
+  margin: 0;
+  white-space: pre-wrap; /* Keeps line breaks and spaces */
+}

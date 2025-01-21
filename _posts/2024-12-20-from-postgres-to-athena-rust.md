@@ -229,17 +229,6 @@ project_schemas
 ```
 Then I had to combine all the data, add some calculations, write the result into parquet file and upload to S3 into the designated busket/folder.
 
-[//]: # ()
-[//]: # (<div class="code-container">)
-
-[//]: # ()
-[//]: # (    <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs"></script>)
-
-[//]: # ()
-[//]: # (</div>)
-
-[//]: # ()
-
 First we need to bring modules and structs into the scope of our `combined_orders.rs` task.
 
 ```rust
@@ -262,7 +251,7 @@ Example:
 
 In the prelude module, I have imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`,  `combined_orders.rs` file can directly use these items without specifying them individually.
 
-The full [prelude](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs) code.
+The full [prelude](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-task_mod-rs) code.
 
 [//]: # ()
 [//]: # (<div class="code-container">)
@@ -301,8 +290,29 @@ fn main() {
     example_function();
 }
 ```
+The prelude model is inside `mod.rs` file which is in
 
-then I have 
+```shell
+project_tasks
+├── src
+   └── tasks 
+         ├── mod.rs
+         ├── combined_orders.rs
+         └── .. other tasks
+        
+└── Cargo.toml
+```
+In `mod.rs` I also have
+```rust
+mod combined_orders; 
+pub use self::combined_orders::*;
+```
+What it does:
+
+`pub use self::combined_orders::*;` re-exports all public items from the combined_orders module, making them available to other parts of the codebase that import this parent module.
+This pattern is often used in a module hierarchy to provide a clean interface to submodules by selectively exposing their contents.
+
+then in `combined_orders.rs` I have 
 ```rust
 use std::collections::HashMap;
 ```
@@ -338,7 +348,7 @@ It will handle the input, fields/types and write the struct to a file in Parquet
 
 Then there is the task itself, `pub` which means it can be called outside the module,
 the task takes as input a reference to a string (`&str`), representing PostgreSQL connection URI,  and returns a tuple of String and bigint.
-The full task code is [combined_orders.rs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=combined_orders.rs)
+The full task code is [combined_orders.rs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-combined_orders-rs)
 
 ```rust
 pub fn combined_orders(pg_uri: &str) -> (String, i64) {
@@ -400,6 +410,11 @@ as here I will get an empty `Vec<Product>` into my data.
 Usually the `panic!()` was caused by changes in the underlying Postgres tables, like removed column, unexpected type etc. I couldn't dynamically construct a struct in Rust with Diesel - so if I had a column in my table! macro definition and a struct but `.load::<Product>` didn't find it - it will result in panic.
 In that case running the task further which was loading this table didn't make sense hence `panic!()` behaviour was justified.
 
+There is also an operator **_?_** which operator propagates errors if any occur during the creation of the file writer avoiding unexpected panic. Requires `Result/Option` return:
+If the operation returns _**Ok(value)**_, it extracts the value and continues execution.
+If the operation returns **_Err(error)_**, it propagates the error to the calling function.
+
+Taking into account that the continuing the task without the connection to Postgres didn't make any sense, I have not considered this option.
 
 I wanted to see how long it takes to load some tables, for that I had
 ```rust
@@ -429,6 +444,7 @@ let order_ids: Vec<i32> = users.iter().filter_map(|x| x.order_id).collect();
 `users.iter().filter_map(|x| x.order_id).collect();`
 
 `users.iter()` creates an iterator over the users vector, producing references to each User object, without consuming the collection.
+It returns an iterator of type `std::slice::Iter<'_, T>`, in this case `users` is `Vec<User>`, so T = User.
 
 `.filter_map(|x| x.order_id).collect()` creates a vector (order_ids) that contains the order_id field of each user from the users vector, but only if order_id is Some(i32). The filter_map function filters out None values and collects only Some(i32) values into the vector. This results in a list of order_ids from users.
 
@@ -526,490 +542,627 @@ The `.collect()` method collects all the `CombinedOrderRecord` instances into a 
 `let parquet_records: Vec<CombinedOrderRecord> = ...`
 
 After this collection I need to write the file into parquet format and upload to S3. 
+How to do it?
+Now we have:
 
-[//]: # (Here we come to the part: why we have `use super::prelude::*;` at the top of `combined_orders.rs` task.)
+1.  Define the Path & get parquet_records of type **_CombinedOrderRecord_**
+
+    ```rust
+    let path = "/tmp/combined_orders.parquet";
+    let path_meta = <&str>::clone(&path); 
+    let mut count = 0;
+
+    let parquet_records: Vec<CombinedOrderRecord> = orders
+    ...
+    ```
+
+2.  Get the Schema
+
+    ```rust
+    let vector_for_schema = &parquet_records;
+    let schema = vector_for_schema.as_slice().schema().unwrap();
+    println!("{:?} schema", &schema);
+    ```
+
+    Here:
+    `vector_for_schema` is now a reference to the vector `parquet_records`, meaning I can use it without moving ownership.
+    
+    `as_slice()` converts the vector reference into a slice (&[T]), allowing slice-based operations.
+    `.schema()` is a method provided by a trait **_ParquetRecordWriter_**, which extracts the Parquet schema from the data structure (`schema()` returns `Result<parquet::schema::types::TypePtr, parquet::errors::ParquetError>`).
+    `.unwrap()` is used to handle the Result type returned by `.schema()`, which will panic if the operation fails. If the schema extraction is successful, it returns the schema object.
+
+3.  Open File for Writing
+
+    ```rust
+    let file = std::fs::File::create(path).unwrap();
+    let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
+    ```
+
+    `std::fs::File::create(path):`
+    Opens the specified file for writing or creates the file if it doesn't already exist and panics on failure.
+    
+    `SerializedFileWriter::new(file, schema, props())`:
+    Initializes a Parquet file writer.
+    Takes the file, schema, and writer properties (props()) as inputs.
+    `props()`: Refers to writer properties. Initially we had to define them in each task as `let props = Arc::new(WriterProperties::builder().build());` but now it's getting pulled from `project_parquet` as
+    
+    ```rust
+    pub fn props() -> Arc<WriterProperties> {
+        Arc::new(
+            WriterProperties::builder()
+                .set_compression(parquet::basic::Compression::GZIP)
+                .build(),
+        )
+    }
+    ```
+    where
+    `-> Arc<WriterProperties>` This defines a public function named props that returns a reference-counted (Arc) instance of WriterProperties.
+    _Arc_ stands for **_Atomic Reference Counting_**, which allows safe, shared ownership of data across multiple threads in a concurrent environment.
+    **_WriterProperties_** is a struct from the **_parquet_** crate used to configure properties for writing Parquet files.
+    
+    _**WriterProperties::builder()**_  initializes a builder pattern for creating **_WriterProperties_** instances, which allows chaining of configuration methods.
+    **_.set_compression(parquet::basic::Compression::GZIP)_** configures the writer to use **_GZIP_** compression for **_Parquet_** file output.
+    **_parquet::basic::Compression::GZIP_** specifies GZIP as the compression codec.
+    **_.build()_** finalizes and constructs an instance of **_WriterProperties_** with the specified settings.
+    **_Arc::new(...)_** wraps the created **_WriterProperties_** inside an **_Arc_**, enabling shared ownership.
+    
+4.  Write Data to the File
+    
+    ```rust
+    let mut row_group = pfile.next_row_group().unwrap();
+    (&parquet_records[..])
+        .write_to_row_group(&mut row_group)
+        .expect("can't 'write_to_row_group' ...");
+    pfile.close_row_group(row_group).unwrap();
+    count += 1;
+    println!("{} count", count);
+    ```
+
+    **_pfile.next_row_group():_**
+    Prepares the next row group for writing.
+    Row groups are logical blocks of rows within a Parquet file.
+    **_write_to_row_group:_**
+    Serializes the **_parquet_records_** and writes them to the current row group.
+    Panics with a custom error message if writing fails.
+    **_pfile.close_row_group(row_group):_**
+    Closes the row group after writing.
+    **_count:_**
+    Tracks the number of row groups written.
+    This code increments and prints it.
+    
+5.  Finalize the File
+    `pfile.close().unwrap();`
+    `.close()`: when writing data to a file, it is often buffered in memory before being written to disk.
+    Calling `close()` ensures  that resources are properly released and all buffered data is written (flushed) to the file system, preventing data loss.
+    
+    
+6. Read Metadata from the File for prometheus metrics
+    
+    ```rust
+    let reader = SerializedFileReader::try_from(path_meta).unwrap();
+    let parquet_metadata = reader.metadata();
+    let file_metadata = parquet_metadata.file_metadata();
+    let rows_number = file_metadata.num_rows();
+    (path.into(), rows_number)
+    ```
+
+    **_SerializedFileReader::try_from(path_meta):_**
+    Opens the written Parquet file for reading.
+    Reads the file metadata for verification or further processing.
+    **_file_metadata.num_rows():_**
+    Retrieves the number of rows written to the file.
+    **_(path.into(), rows_number):_**
+    Returns the file path and the number of rows as the output of the task.
+
+In order to be able to write files into parquet I'm using the crates `parquet` and `parquet_derive` as well as extra methods from `project_parquet` defined by us:
+
+in `project_parquet`
+```rust
+use parquet::file::properties::WriterProperties;
+use std::sync::Arc;
+use parquet::file::writer::{ParquetWriter, SerializedFileWriter}; 
+
+pub fn props() -> Arc<WriterProperties> {
+    Arc::new(
+        WriterProperties::builder()
+            .set_compression(parquet::basic::Compression::GZIP)
+            .build(),
+    )
+}
+
+pub trait FileWriterRows {
+    fn total_num_rows(&mut self) -> &i64;
+}
+
+impl<W: 'static + ParquetWriter> FileWriterRows for SerializedFileWriter<W> {
+    fn total_num_rows(&mut self) -> &i64 {
+        &50
+
+    }
+} 
+pub mod prelude {
+
+    pub use super::props;
+    pub use super::FileWriterRows;
+    pub use parquet::file::properties::WriterProperties;
+    pub use parquet::file::writer::{FileWriter, SerializedFileWriter};
+    pub use parquet::record::RecordWriter;
+
+}
+```
+Where:
+
+`WriterProperties` – Provides configuration settings for Parquet file writing (e.g., compression).
+`Arc` – A thread-safe reference-counting pointer to allow shared ownership across threads.
+`ParquetWriter` & `SerializedFileWriter` – Handle the writing of data to Parquet files.
+
+Function `fn props()`:
+```rust
+pub fn props() -> Arc<WriterProperties> {
+   Arc::new(
+     WriterProperties::builder()
+     .set_compression(parquet::basic::Compression::GZIP)
+     .build(),
+   )
+}
+```
+Creates and returns Parquet writer properties wrapped in an `Arc`, which allows safe sharing across multiple threads.
+`set_compression(parquet::basic::Compression::GZIP)` – Sets the compression type to GZIP for efficient storage.
+
+
+Trait: `FileWriterRows`
+```rust
+pub trait FileWriterRows {
+   fn total_num_rows(&mut self) -> &i64;
+}
+```
+Defines a trait with a method `total_num_rows` that should return a reference to an `i64` (indicating the number of rows written).
+
+Trait Implementation for `SerializedFileWriter`
+```rust
+impl<W: 'static + ParquetWriter> FileWriterRows for SerializedFileWriter<W> {
+   fn total_num_rows(&mut self) -> &i64 {
+    // &50
+    &self.total_num_rows
+   }
+}
+```
+Implements the FileWriterRows trait for `SerializedFileWriter<W>`, which is responsible for writing Parquet data to a file.
+The issue: we used to have `&self.total_num_rows` from  `parquet::file::writer::SerializedFileWriter`
+```rust
+pub struct SerializedFileWriter<W: ParquetWriter> {
+    buf: W,
+    schema: TypePtr,
+    descr: SchemaDescPtr,
+    props: WriterPropertiesPtr,
+    total_num_rows: i64,...
+```
+but after another crate update it became a private field so we lost access to it. TODO was to figure it out but at the end we just hardcoded a meaningless number.
+
+5. Module: prelude
+```rust
+pub mod prelude {
+   pub use super::props;
+   pub use super::FileWriterRows;
+   pub use parquet::file::properties::WriterProperties;
+   pub use parquet::file::writer::{FileWriter, SerializedFileWriter};
+   pub use parquet::record::RecordWriter;
+   }
+```
+Provides a convenient way to import commonly used items by simply writing use `project_parquet::prelude::*;`.
 
 [//]: # ()
-[//]: # (What it does:)
+[//]: # (We used to have)
 
-[//]: # ()
-[//]: # (This imports all public items from the prelude module defined in the parent module &#40;super&#41;.)
-
-[//]: # (The * wildcard includes everything that is publicly available within the prelude module.)
-
-[//]: # (Purpose:)
-
-[//]: # ()
-[//]: # (This is a common Rust pattern used to create a "prelude" module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.)
-
-[//]: # (Example:)
-
-[//]: # ()
-[//]: # (In my prelude module, I have imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`, my `combined_orders.rs` file can directly use these items without specifying them individually.)
-
-[//]: # ()
-[//]: # (prelude mode looks like )
-
-[//]: # ()
-[//]: # (<div class="code-container">)
-
-[//]: # ()
-[//]: # (  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs"></script>)
-
-[//]: # ()
-[//]: # (</div>)
-
-[//]: # ()
-[//]: # (which means I can use all public items from this module.)
-
-[//]: # (Where)
-
-[//]: # (The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name. )
-
-[//]: # (My idea was to use it for generating a file name on the fly &#40;it was at the beginning of my Rust journey&#41; however, `use` cannot be used to dynamically retrieve the name of a function at runtime.)
-
-[//]: # ()
-[//]: # (In theory, what it does:)
-
-[//]: # ()
-[//]: # (`function_name` Crate)
-
-[//]: # (The `function_name` crate provides a procedural macro to retrieve the name of the current function at runtime in Rust. It is often used for logging, debugging, or tracing purposes.)
-
-[//]: # ()
-[//]: # (named Macro)
-
-[//]: # (The named macro is a part of the function_name crate. It allows me to annotate a function so that I can programmatically access its name as a string during runtime.)
-
-[//]: # ()
-[//]: # (When I apply `#[named]` to a function, it makes the name of the function accessible via a special constant or variable, usually _function_name.)
-
-[//]: # (I can then log or use the function's name directly.)
-
-[//]: # ()
 [//]: # (```rust)
 
-[//]: # (use function_name::named;)
+[//]: # (let props = Arc::new&#40;WriterProperties::builder&#40;&#41;.build&#40;&#41;&#41;;)
 
-[//]: # ()
-[//]: # (#[named])
+[//]: # (let schema = inputs[0].1.file_metadata&#40;&#41;.schema_descr&#40;&#41;.root_schema_ptr&#40;&#41;;)
 
-[//]: # (fn example_function&#40;&#41; {)
-
-[//]: # (    println!&#40;"Function name: {}", function_name!&#40;&#41;&#41;;)
-
-[//]: # (})
-
-[//]: # ()
-[//]: # (fn main&#40;&#41; {)
-
-[//]: # (    example_function&#40;&#41;;)
-
-[//]: # (})
+[//]: # (let mut writer = SerializedFileWriter::new&#40;output, schema, props&#41;?;)
 
 [//]: # (```)
 
-The prelude model is inside `mod.rs` file which is in 
+[//]: # (while using the previous version of parquet crate.)
 
-```shell
-project_tasks
-├── src
-   └── tasks 
-         ├── mod.rs
-         ├── combined_orders.rs
-         └── .. other tasks
-        
-└── Cargo.toml
-```
-In `mod.rs` I also have 
+[//]: # ()
+[//]: # (This snippet sets up a Parquet file writer with the following:)
+
+[//]: # ()
+[//]: # (**_Properties &#40;props&#41;_**: Specifies settings like compression and encoding.)
+
+[//]: # (**_Schema &#40;schema&#41;_**: Defines the structure of the data.)
+
+[//]: # (**_File Writer &#40;writer&#41;_**: Prepares the output destination for writing Parquet data.)
+
+[//]: # (This is the initialization step before writing rows of data into a Parquet file.)
+
+[//]: # ()
+[//]: # (Where:)
+
+[//]: # (**_WriterProperties_** were used to configure properties for writing Parquet files.)
+
+[//]: # (Common configurations include compression algorithms, encoding, and other optimizations.)
+
+[//]: # (**_WriterProperties::builder&#40;&#41;_** provides a builder pattern to customize these properties.)
+
+[//]: # ()
+[//]: # (**_Arc::new&#40;...&#41;:_**: **_Arc_** stands for **_Atomic Reference Counting_**, a smart pointer for shared ownership across threads.)
+
+[//]: # (In this case, it ensures that the **_WriterProperties_** can be shared safely if multiple threads are involved &#40;so different parts of my program &#40;running concurrently in separate threads&#41; might need to access and use the same instance of **_WriterProperties_**&#41;.)
+
+[//]: # (The **_Arc_** wraps the **_WriterProperties_** object so it can be accessed concurrently in a thread-safe manner.)
+
+[//]: # ()
+[//]: # (in `let schema = inputs[0].1.file_metadata&#40;&#41;.schema_descr&#40;&#41;.root_schema_ptr&#40;&#41;;`)
+
+[//]: # (_**inputs**_: is a collection holding data or file-related information.)
+
+[//]: # (Accessing inputs[0].1 implies the structure is a tuple &#40;e.g., &#40;x, y&#41;&#41; where the second element &#40;1&#41; holds Parquet metadata or file-related information.)
+
+[//]: # ()
+[//]: # (_**file_metadata&#40;&#41;**_: retrieves metadata about the Parquet file, such as schema, row group details, and other properties.)
+
+[//]: # (**_schema_descr&#40;&#41;_**:)
+
+[//]: # ()
+[//]: # (Returns a descriptor of the Parquet schema, which describes the structure of the data &#40;columns, types, etc.&#41;.)
+
+[//]: # (_**root_schema_ptr&#40;&#41;**_: gets a pointer to the root schema of the Parquet file.)
+
+[//]: # (This is required to define the structure of the output Parquet file.)
+
+[//]: # ()
+[//]: # (`let mut writer = SerializedFileWriter::new&#40;output, schema, props&#41;?;`)
+
+[//]: # (**_SerializedFileWriter_**: a key component in the parquet crate for writing Parquet files.)
+
+[//]: # (It handles the serialization of data into the Parquet file format.)
+
+[//]: # ()
+[//]: # (**_new&#40;&#41;_**: creates a new instance of the file writer.)
+
+[//]: # (Takes the following arguments:)
+
+[//]: # (**_output_**: The output destination where the Parquet file will be written. This could be a file, stream, or buffer.)
+
+[//]: # (_**schema**_: The schema descriptor &#40;retrieved earlier&#41; that defines the structure of the data being written.)
+
+[//]: # (**_props_**: The writer properties &#40;e.g., compression settings&#41; defined earlier.)
+
+[//]: # (?: the ? operator propagates errors if any occur during the creation of the file writer avoiding unexpected panic. Requires `Result/Option` return: )
+
+[//]: # (If the operation returns _**Ok&#40;value&#41;**_, it extracts the value and continues execution.)
+
+[//]: # (If the operation returns **_Err&#40;error&#41;_**, it propagates the error to the calling function.)
+
+[//]: # ()
+[//]: # (The difference with possible usage of **_unwrap&#40;&#41;_** is that `unwrap&#40;&#41;` panics on Error:)
+
+[//]: # ()
+[//]: # (If the operation returns _**Ok&#40;value&#41;**_, it extracts the value and continues execution.)
+
+[//]: # (If the operation returns **_Err&#40;error&#41;_**, it panics, terminating the program.)
+
+After we defined the function `pub fn combined_orders()` we need to call/execute it. For that after the function we have: 
+
 ```rust
-mod combined_orders; 
-pub use self::combined_orders::*;
+pub struct CombinedOrdersTask {}
+
+impl ProjectTask for CombinedOrdersTask {
+    fn run(&self, postgres_uri: &str) -> (String, i64) {
+        combined_orders(postgres_uri)
+    }
+}
 ```
-What it does:
+**_CombinedOrdersTask_** is an empty public struct, used as a unit struct to represent a specific task related to processing combined orders.
+It acts as a concrete implementation of the **_ProjectTask_** trait.
 
-`pub use self::combined_orders::*;` re-exports all public items from the combined_orders module, making them available to other parts of the codebase that import this parent module.
-Purpose:
+The **_run_** function is implemented to execute the **_combined_orders_** function, which processes data from the PostgreSQL database.
+It follows the **_ProjectTask_** trait signature (**_fn run(&self, postgres_uri: &str) -> (String, i64);_**).
 
-This pattern is often used in a module hierarchy to provide a clean interface to submodules by selectively exposing their contents.
+where `ProjectTask` (defined in prelude in `mod.rs`) is:
 
-In addition I also have
 ```rust
 pub trait ProjectTask: Sync + Send + RefUnwindSafe + UnwindSafe {
-fn run(&self, postgres_uri: &str) -> (String, i64);
+    fn run(&self, postgres_uri: &str) -> (String, i64);
 }
 ```
 What it does:
 
 This defines a trait `ProjectTask` that any implementing type must satisfy.
-Types implementing ProjectTask must:
-Be thread-safe (Sync and Send).
-Be safe to use across unwind boundaries (RefUnwindSafe and UnwindSafe).
-Provide a run function with the specified signature, which takes a PostgreSQL connection string (postgres_uri) and returns a tuple (String, i64).
-Purpose:
+Types implementing **_ProjectTask_** must:
+- Be thread-safe (_**Sync and Send**_).
+- Be safe to use across unwind boundaries (**_RefUnwindSafe and UnwindSafe_**).
+- Provide a _**run**_ function with the specified signature, which takes a PostgreSQL connection string (**_postgres_uri_**) and returns a tuple **_(String, i64)_**.
 
-Traits like this are often used to define a shared interface for a family of tasks that can perform some operation (e.g., database processing) and return results.
+This trait is used to define a shared interface for a family of tasks that can perform some operation and return results.
 
-and
+In `mod.rs` I also have a definition of async trait `ProjectStreamingTask` for the streaming tasks.
+
 ```rust
 #[async_trait]
 pub trait ProjectStreamingTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
-async fn run(&self, postgres_uri: &str) -> (String, i64);
+    async fn run(&self, postgres_uri: &str) -> (String, i64);
 }
 ```
-What it does:
 
-Similar to ProjectTask, this defines a trait for asynchronous tasks.
-The #[async_trait] attribute allows the run function to be an async fn, enabling asynchronous operations within the trait implementation.
-Purpose:
-
-This trait is designed for streaming tasks that may involve asynchronous operations, such as reading data from a database, processing it, and returning results.
+Similar to **_ProjectTask_**, this defines a trait for asynchronous tasks.
+The #[async_trait] attribute allows the run function to be an **_async fn_**, enabling asynchronous operations within the trait implementation.
+It's  designed for streaming tasks that may involve asynchronous operations, such as reading data from a database, processing it, and returning results.
 Types implementing this trait must also be thread-safe and debug-friendly.
 
+<details>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <summary>More details about <code><strong>Thread-Safe</strong></code> (Sync and Send) traits</summary>
 
-More details about `Thread-Safe` (Sync and Send) traits:
-`Send Trait`
-A type that implements `Send` can safely be transferred between threads.
-For example, if a type is `Send`, it can be passed to a thread or moved into a thread pool for parallel execution.
-Most primitive types in Rust (like integers and String) are Send by default. However, types that contain raw pointers or manage non-thread-safe resources might not be.
-(Raw pointers in Rust are *const T (immutable) and *mut T (mutable). These are low-level constructs that provide direct memory access, similar to pointers in C or C++. Unlike Rust's references (&T and &mut T).
-Raw pointers: 
-Lack Safety Guarantees:
+  A type that implements <em>Send</em> can safely be transferred between threads.<br>
+  For example, if a type is <em>Send</em>, it can be passed to a thread or moved into a thread pool for parallel execution.<br>
+  Most primitive types in <em>Rust</em> (like integers and String) are <em>Send</em> by default. However, types that contain raw pointers or manage non-thread-safe resources might not be.<br>
+  (Raw pointers in Rust are <em>*const T</em> (immutable) and <em>*mut T</em> (mutable). These are low-level constructs that provide direct memory access, similar to pointers in C or C++. Unlike Rust's references (&T and &mut T).<br>
 
-They do not enforce borrow checking, lifetimes, or ownership rules.
-This means I can create dangling pointers, null pointers, or data races if not handled carefully.
-Use Cases:
+  <code><strong>Raw pointers</strong></code>:<br> 
+  <ul>Lack Safety Guarantees:<br>
+    
+  <li>They do not enforce borrow checking, lifetimes, or ownership rules.</li>
+  <li>This means I can create dangling pointers, null pointers, or data races if not handled carefully.</li>
+  <li>Use Cases:</li>
+    
+  Raw pointers are typically used in unsafe code for advanced scenarios, such as:<br>
+  <li>Interfacing with C code.</li>
+  <li>Optimizing performance when known that the operations are safe.</li>
+  <li>Implementing custom data structures or memory allocators.</li>
+  </ul>
+  Example:
+  <pre><code class="language-rust">
+    let x = 1;
+    let raw_ptr: *const i32 = &x;
+    
+    unsafe {
+        println!("Value at raw pointer: {}", *raw_ptr); // Unsafe block is required
+    }
+  </code></pre>
+    
+  <strong><em>Non-Thread-Safe Resources</em></strong>
+  <em>Non-thread-safe</em> resources are types or constructs that cannot safely be shared or accessed by multiple threads simultaneously. 
+  These might include:<br>
+    
+  <em>Rc&lt;T&gt;(Reference Counted Smart Pointer)</em><br>
+  <em>Rc&lt;T&gt;</em> provides shared ownership of a value but is not thread-safe because it doesn’t use atomic operations to manage the reference count.
+  Instead, <em>Arc&lt;T&gt;</em> (atomic reference counter) is used for thread-safe shared ownership.
+    
+  Example:
+  <pre><code class="language-rust">
+  use std::rc::Rc;
+  let data = Rc::new(42);
+  let cloned = Rc::clone(&data); // Safe in a single-threaded context
+  // Rc is NOT `Send`, so it cannot be shared between threads
+  </code></pre>
+    
+  <strong><em>Unsafe Data Structures</em></strong>
+  Structures that allow direct, uncontrolled access to their internals, like raw pointers or custom synchronization primitives without proper locking mechanisms.<br>
+    
+  Global state:<br>
+  Global variables or mutable static variables can lead to data races if accessed without proper synchronization.<br>
+  Example of Non-Thread-Safe Code:<br>
+  <pre><code class="language-rust">
+  use std::cell::RefCell;
+  let data = RefCell::new(5);
+  // RefCell is not thread-safe, so this would cause issues in a multi-threaded context
+  *data.borrow_mut() = 10;
+  </code></pre>
 
-- Raw pointers are typically used in unsafe code for advanced scenarios, such as:
-- Interfacing with C code.
-- Optimizing performance when known that the operations are safe.
-- Implementing custom data structures or memory allocators.)
+  <strong><em>Thread-Safe Alternatives</em></strong>
+  For non-thread-safe types, Rust provides thread-safe alternatives:<br>
+    
+  Instead of <em>Rc&lt;T&gt;</em>: Use <em>Arc&lt;T&gt;</em> for thread-safe reference counting.
+  Instead of <em>RefCell&lt;T&gt;</em>: Use <em>Mutex&lt;T&gt;</em> or <em>RwLock&lt;T&gt;</em> for synchronized interior mutability.
+  Global State: Use <em>lazy_static</em> or <em>OnceCell</em> for safe initialization of global variables.
+    
+  <strong><em>Sync Trait</em></strong>
 
-Example:
-```rust
-let x = 1;
-let raw_ptr: *const i32 = &x;
+  A type that implements <em>Sync</em> can safely be shared between threads by reference.
+    For example, if <em>T</em> is <em>Sync</em>, then <em>&T</em> (a shared reference to <em>T</em>) can be accessed by multiple threads simultaneously without issues.
+    This requires that the type guarantees no race conditions or undefined behavior, even when accessed concurrently by multiple threads.<br>
 
-unsafe {
-    println!("Value at raw pointer: {}", *raw_ptr); // Unsafe block is required
-}
-```
-
-Non-Thread-Safe Resources
-Non-thread-safe resources are types or constructs that cannot safely be shared or accessed by multiple threads simultaneously. These might include:
-
-Rc<T> (Reference Counted Smart Pointer)
-Rc<T> provides shared ownership of a value but is not thread-safe because it doesn’t use atomic operations to manage the reference count.
-Instead, Arc<T> (atomic reference counter) is used for thread-safe shared ownership.
-
-Example:
-```rust
-use std::rc::Rc;
-
-let data = Rc::new(42);
-
-let cloned = Rc::clone(&data); // Safe in a single-threaded context
-// Rc is NOT `Send`, so it cannot be shared between threads
-```
-
-Unsafe Data Structures
-Structures that allow direct, uncontrolled access to their internals, like raw pointers or custom synchronization primitives without proper locking mechanisms.
-Global State
-Global variables or mutable static variables can lead to data races if accessed without proper synchronization.
-Example of Non-Thread-Safe Code:
-```rust
-use std::cell::RefCell;
-
-let data = RefCell::new(5);
-// RefCell is not thread-safe, so this would cause issues in a multi-threaded context
-*data.borrow_mut() = 10;
-```
-
-Thread-Safe Alternatives
-For non-thread-safe types, Rust provides thread-safe alternatives:
-
-Instead of Rc<T>: Use Arc<T> for thread-safe reference counting.
-Instead of RefCell<T>: Use Mutex<T> or RwLock<T> for synchronized interior mutability.
-Global State: Use lazy_static or OnceCell for safe initialization of global variables.
-
-`Sync Trait`
-A type that implements `Sync` can safely be shared between threads by reference.
-For example, if `T` is `Sync`, then `&T` (a shared reference to `T`) can be accessed by multiple threads simultaneously without issues.
-This requires that the type guarantees no race conditions or undefined behavior, even when accessed concurrently by multiple threads.
-Thread-Safety in Practice
-Types that implement both Sync and Send are considered thread-safe in Rust. This ensures that the type can be used safely in multi-threaded environments.
-Example:
-```rust
-use std::sync::Arc;
-use std::thread;
-
-let data = Arc::new(vec![1, 2, 3]); // `Arc` is thread-safe
-let data_clone = Arc::clone(&data);
-
-thread::spawn(move || {
+  Thread-Safety in Practice<br>
+  Types that implement both <em>Sync</em> and <em>Send</em> are considered thread-safe in Rust. This ensures that the type can be used safely in multi-threaded environments.<br>
+  Example:
+  <pre><code>
+  use std::sync::Arc;
+  use std::thread;
+    
+  let data = Arc::new(vec![1, 2, 3]); // `Arc` is thread-safe
+  let data_clone = Arc::clone(&data);
+    
+  thread::spawn(move || {
     println!("{:?}", data_clone); // Safe because `Arc` is `Sync` and `Send`
-}).join().unwrap();
-```
-Why Arc is Sync and Send
-Arc<T> (Atomic Reference Counted) is a smart pointer in Rust used for shared ownership of a value in a thread-safe manner. It achieves this by using atomic operations to manage its reference count, making it safe for use across multiple threads.
+  }).join().unwrap();
+  </code></pre>
 
-How Sync Applies to Arc<T>
-A type T is Sync if it can be safely shared between threads by reference (&T).
-Arc<T> is Sync because:
-It ensures atomicity of its reference count updates.
-The underlying data is immutable (by default) or access to it is protected (e.g., using locks like Mutex or RwLock), preventing data races.
-How Send Applies to Arc<T>
-A type T is Send if it can be safely transferred between threads.
-Arc<T> is Send because:
-Its internal reference count is updated atomically, so moving it to another thread does not cause unsafe behavior.
-The ownership of the Arc pointer itself (not the underlying data) is transferred safely.
+  Why Arc is Sync and Send<br>
+  <em>Arc&lt;T&gt;</em> (Atomic Reference Counted) is a smart pointer in Rust used for shared ownership of a value in a thread-safe manner. It achieves this by using atomic operations to manage its reference count, making it safe for use across multiple threads.<br>
+  How Sync Applies to <em>Arc&lt;T&gt;</em><br>
+  A type T is Sync if it can be safely shared between threads by reference (&T).<br>
+  <em>Arc&lt;T&gt;</em> is Sync because:
+  <ul>
+  <li>It ensures atomicity of its reference count updates.</li>
+  <li>The underlying data is immutable (by default) or access to it is protected (e.g., using locks like Mutex or RwLock), preventing data races.</li>
+  </ul>  
+  How Send Applies to <em>Arc&lt;T&gt;</em>:<br>
+  A type T is Send if it can be safely transferred between threads.<br>
 
-We used to have 
-```rust
-let props = Arc::new(WriterProperties::builder().build());
-let schema = inputs[0].1.file_metadata().schema_descr().root_schema_ptr();
-let mut writer = SerializedFileWriter::new(output, schema, props)?;
-```
-while using the previous version of parquet crate.
+<em>Arc&lt;T&gt;</em> is Send because:<br>
+  <ul>
+  <li>Its internal reference count is updated atomically, so moving it to another thread does not cause unsafe behavior.</li>
+  <li>The ownership of the Arc pointer itself (not the underlying data) is transferred safely.</li>
+  </ul>
 
-This snippet sets up a Parquet file writer with the following:
+</details>
 
-Properties (props): Specifies settings like compression and encoding.
-Schema (schema): Defines the structure of the data.
-File Writer (writer): Prepares the output destination for writing Parquet data.
-This is typically the initialization step before writing rows of data into a Parquet file.
-
-Where
-WriterProperties:
-
-This object is used to configure properties for writing Parquet files.
-Common configurations include compression algorithms, encoding, and other optimizations.
-WriterProperties::builder() provides a builder pattern to customize these properties.
-Arc::new(...):
-
-Arc stands for Atomic Reference Counting, a smart pointer for shared ownership across threads.
-In this case, it ensures that the WriterProperties can be shared safely if multiple threads are involved.
-The Arc wraps the WriterProperties object so it can be accessed concurrently in a thread-safe manner.
-
-in `let schema = inputs[0].1.file_metadata().schema_descr().root_schema_ptr();`
-inputs:
-
-inputs seems to be a collection (likely a vector or similar structure) holding data or file-related information.
-Accessing inputs[0].1 implies the structure is a tuple (e.g., (x, y)) where the second element (1) holds Parquet metadata or file-related information.
-file_metadata():
-
-Retrieves metadata about the Parquet file, such as schema, row group details, and other properties.
-schema_descr():
-
-Returns a descriptor of the Parquet schema, which describes the structure of the data (columns, types, etc.).
-root_schema_ptr():
-
-Gets a pointer to the root schema of the Parquet file.
-This is required to define the structure of the output Parquet file.
-
-`let mut writer = SerializedFileWriter::new(output, schema, props)?;`
-SerializedFileWriter:
-
-A key component in the parquet crate for writing Parquet files.
-It handles the serialization of data into the Parquet file format.
-new:
-
-Creates a new instance of the file writer.
-Takes the following arguments:
-output: The output destination where the Parquet file will be written. This could be a file, stream, or buffer.
-schema: The schema descriptor (retrieved earlier) that defines the structure of the data being written.
-props: The writer properties (e.g., compression settings) defined earlier.
-?:
-
-The ? operator propagates errors if any occur during the creation of the file writer. If no errors occur, execution continues.
-
-Now we are using 
-1. Define the Path & get parquet_records of type CombinedOrderRecord
-```rust
-let path = "/tmp/combined_orders.parquet";
-let path_meta = <&str>::clone(&path);   let vector_for_schema = &parquet_records;
-let mut count = 0;
-
-let parquet_records: Vec<CombinedOrderRecord> = orders
-...
-;
-
-2. Get the Schema
-```rust
-let vector_for_schema = &parquet_records;
-let schema = vector_for_schema.as_slice().schema().unwrap();
-println!("{:?} schema", &schema);
-```
-
-3. Open File for Writing
-```rust
-let file = std::fs::File::create(path).unwrap();
-let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
-```
-std::fs::File::create(path):
-Opens the specified file for writing.
-Creates the file if it doesn't already exist.
-Panics on failure.
-SerializedFileWriter::new(file, schema, props()):
-Initializes a Parquet file writer.
-Takes the file, schema, and writer properties (props()) as inputs.
-props(): Presumably refers to writer properties like compression or encoding. If missing, it needs to be properly defined elsewhere.
-
-4. Write Data to the File
-```rust
-let mut row_group = pfile.next_row_group().unwrap();
-(&parquet_records[..])
-    .write_to_row_group(&mut row_group)
-    .expect("can't 'write_to_row_group' ...");
-pfile.close_row_group(row_group).unwrap();
-count += 1;
-println!("{} count", count);
-```
-
-pfile.next_row_group():
-Prepares the next row group for writing.
-Row groups are logical blocks of rows within a Parquet file.
-write_to_row_group:
-Serializes the parquet_records and writes them to the current row group.
-Panics with a custom error message if writing fails.
-pfile.close_row_group(row_group):
-Closes the row group after writing.
-count:
-Tracks the number of row groups written.
-This code increments and prints it.
-
-5.  Finalize the File
-`pfile.close().unwrap();`
-
-6.Read Metadata from the File
-
-```rust
-let reader = SerializedFileReader::try_from(path_meta).unwrap();
-let parquet_metadata = reader.metadata();
-let file_metadata = parquet_metadata.file_metadata();
-let rows_number = file_metadata.num_rows();
-(path.into(), rows_number)
-```
-SerializedFileReader::try_from(path_meta):
-Opens the written Parquet file for reading.
-Reads the file metadata for verification or further processing.
-file_metadata.num_rows():
-Retrieves the number of rows written to the file.
-(path.into(), rows_number):
-Returns the file path and the number of rows as the output of the task.
+<details>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script>hljs.highlightAll();</script>
+  <summary>More details about <code><strong>Safe to Use Across Unwind Boundaries</strong></code></summary>
 
 
-parquet_records: A collection of records (of type CombinedOrderRecord) that you want to write to the Parquet file.
-vector_for_schema.as_slice(): Converts the Vec of records into a slice.
-schema(): Derives the schema from the slice. This step retrieves the structure of the data to define how it will be serialized into the Parquet format.
-unwrap(): Ensures that the schema extraction succeeds; if it doesn't, the program panics.
-println!: Prints the schema for debugging or informational purposes.
+  <em><strong>Safe to Use Across Unwind Boundaries (RefUnwindSafe and UnwindSafe)</strong></em>
 
-
-Safe to Use Across Unwind Boundaries (`RefUnwindSafe and UnwindSafe`)
-What Are Unwind Boundaries?
-In Rust, an unwind occurs when a panic happens and the program starts cleaning up by dropping variables and freeing resources.
-Code that interacts with panics must ensure that resources are safely released and that the program can recover or terminate gracefully.
-UnwindSafe Trait
-A type that implements UnwindSafe ensures that it remains in a valid state if a panic occurs while the type is being accessed or used.
-For example, a struct that only contains primitive types or safe abstractions like String will be UnwindSafe.
-RefUnwindSafe Trait
-A type that implements RefUnwindSafe guarantees that it can be safely accessed through a reference (&T) across an unwind boundary.
-This is a stricter guarantee than UnwindSafe because it deals with shared references.
-Practical Use of Unwind Safety
-These traits are mainly used in scenarios where panics can happen but the program intends to recover gracefully, such as in:
-std::panic::catch_unwind: A function that allows catching panics and continuing execution.
-```rust
-use std::panic;
-
-let result = panic::catch_unwind(|| {
+  What Are Unwind Boundaries?<br>
+    
+  In Rust, an unwind occurs when a panic happens and the program starts cleaning up by dropping variables and freeing resources.<br>
+  Code that interacts with panics must ensure that resources are safely released and that the program can recover or terminate gracefully.<br>
+    
+  <em><strong>UnwindSafe Trait</strong></em>
+    
+  A type that implements <em>UnwindSafe</em> ensures that it remains in a valid state if a panic occurs while the type is being accessed or used.<br>
+  For example, a struct that only contains primitive types or safe abstractions like <em>String</em> will be <em>UnwindSafe</em>.<br>
+    
+  <em><strong>RefUnwindSafe Trait</strong></em>
+    
+  A type that implements <em>RefUnwindSafe</em> guarantees that it can be safely accessed through a reference (<em>&T</em>) across an unwind boundary.<br>
+  This is a stricter guarantee than <em>UnwindSafe</em> because it deals with shared references.<br>
+    
+  Practical Use of <em>Unwind</em> Safety<br>
+    
+  These traits are mainly used in scenarios where panics can happen but the program intends to recover gracefully, such as in:<br>
+  <em>std::panic::catch_unwind:</em> A function that allows catching panics and continuing execution.
+    
+  <pre><code>
+  use std::panic;
+    
+  let result = panic::catch_unwind(|| {
     println!("Before panic");
     panic!("Oops!");
-});
-
-match result {
+  });
+  match result {
     Ok(_) => println!("Code ran successfully"),
     Err(_) => println!("Caught a panic"),
-}
-```
-Summary
-`Thread-Safety (Sync and Send)`:
+  }
+  </code></pre>
+</details>
+
+
+<strong>Summary</strong>
+<em><strong>Thread-Safety (Sync and Send)</strong><em>:
 
 Ensures a type can be safely transferred (Send) or shared (Sync) between threads without causing race conditions or undefined behavior.
 Important for concurrent or parallel processing.
 
-`Unwind Safety (RefUnwindSafe and UnwindSafe)`:
+<em><strong>Unwind Safety (RefUnwindSafe and UnwindSafe)</strong><em>:
 
 Ensures a type can be safely accessed or manipulated across panic boundaries.
 Important for error handling and maintaining program integrity during panics.
 By combining these guarantees, Rust ensures memory safety, thread safety, and robustness in concurrent and error-prone code.
 
-This structured approach made the code cleaner and easier to maintain.
 
-## ETL Workflow
-
-#### Extract:
-
-The Rust program connected to the Postgres RDS instance and read data from orders and users tables.
-
-
-#### Transform:
-
-Using the CombinedOrder struct, I combined and combined the data, e.g., calculating amount_with_tax.
-
-
-#### Load:
-
-Transformed data was written to S3 as Parquet files.
-
-
-The project_aws module contains functions that define the AWS SDK provider for connecting to AWS services. It handles tasks such as loading and streaming data to S3, starting AWS Glue jobs, and managing the flow of data through these services.
-
-
+After the file is written to parquet format it needed to be uploaded to S3 bucket.
+The logic was described in **_project_aws_** module, which  contains functions that define the AWS SDK provider for connecting to AWS services. It handles tasks such as loading and streaming data to S3, starting AWS Glue jobs, and managing the flow of data through these services.
 When we needed to perform calculations separately, such as using a machine learning model, the module was also responsible for reading data from S3, processing it, and then storing the results back into the Postgres database. This was accomplished by leveraging different versions of the AWS Rust SDK, which evolved over time as better crates became available, allowing us to take advantage of more efficient and feature-rich solutions.
-
-
 The overall approach ensured smooth integration with AWS services, allowing us to handle large datasets and computational tasks in a highly scalable and cost-effective manner.
-
 
 Initially we used crates for AWS:
 
 - rusoto_core
-
 - rusoto_s3
-
 - rusoto_glue
 
 
 But later switched to these when they become available:
 
 - aws-sdk-s3
-
 - aws-sdk-glue
-
 - aws-sdk-athena
-
 - aws-config
-
 - aws-credential-types
-
 - aws-smithy-async
-
 - aws-smithy-types
-
 - aws-smithy-runtime-api
 
+Here is the [upload](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-upload_to_s3-rs) function
 
-
-Here is the upload function
-
-
-<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=upload_to_s3.rs"></script>)
-
+What happens here:
+```rust
+pub async fn upload(
+path: PathBuf,
+bucket_name: &str,
+key: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    ...
+}
+```
+`async fn`: The function is asynchronous, meaning it will return a future and can be awaited by the caller.
+`path: PathBuf`: Takes a `PathBuf`, which is an owned, heap-allocated version of a file path.
+`bucket_name: &str`: A reference to the name of the S3 bucket where the file will be uploaded.
+`key: &str`: A reference to the key (object name) under which the file will be stored in S3.
+`Return Type: Result<(), Box<dyn std::error::Error>>`
+If successful, it returns `Ok(())`.
+If an error occurs, it returns a boxed error (dynamic error trait).
 
 These operations can take time, so rather than blocking the execution of the entire program while waiting for them to complete, I allow the program to continue doing other things while waiting for the results.
-
 Later using these functions I got into some 'freeze' but I'll write about it later.
+
+Importing required S3 types inside the function:
+
+```rust
+use aws_sdk_s3::primitives::ByteStream;
+```
+This imports the `ByteStream` struct, which is used to create an S3-compatible stream from the file.
+Reading the file and preparing the request body:
+
+```rust
+let body = ByteStream::from_path(Path::new(&path)).await;
+```
+`ByteStream::from_path(Path::new(&path))` asynchronously reads the file from the given path and creates a byte stream compatible with AWS SDK S3.
+`.await` waits for the operation to complete and assigns the resulting byte stream to body.
+
+Loading AWS S3 configuration:
+
+```rust
+let config = aws_config::from_env().region(REGION).load().await;
+```
+`aws_config::from_env()`: Loads AWS credentials and configuration (such as access keys, regions) from environment variables.
+`.region(REGION)`: Specifies the AWS region to use.
+`.load().await`: Asynchronously loads the configuration.
+
+Creating an S3 client:
+
+```rust
+let client = S3Client::new(&config);
+```
+`S3Client::new(&config)`: Creates a new AWS S3 client using the loaded configuration.
+
+Uploading the file to S3:
+
+```rust
+let _ = client
+.put_object()
+.bucket(bucket_name)
+.key(key)
+.body(body.unwrap())
+.send()
+.await;
+```
+`client.put_object()`: Creates a new S3 upload request.
+`.bucket(bucket_name)`: Specifies the S3 bucket.
+`.key(key)`: Specifies the key (filename) under which the object is stored.
+`.body(body.unwrap())`: Provides the file content as the body (using unwrap() to handle potential errors).
+.send().await`: Sends the upload request asynchronously.
+
+Logging the uploaded file:
+```rust
+info!("Uploaded file: {}", key);
+```
+Logs the success message using the info! macro.
+
+Returning success: `Ok(())`
+
+
+
 
 
 We also used to have
@@ -1020,24 +1173,709 @@ let credentials_provider = DefaultCredentialsProvider::new().map_err(Box::new)?
 
 but later switched to `aws_config`
 
+After uploading file to S3 we had to [crawl](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_crawler-rs) it with the Glue crawler, but initially had to create the function which would create crawler if it didn't exist.
 
-After uploading file to S3 we had to crawl it with the Glue crawler, but initially had to create the function which would create crawler if it didn't exist.
+What does this function do? 
+- Loads AWS credentials and region configuration.
+- Checks if an AWS Glue crawler with the given name exists.
+- If the crawler exists, it logs a message.
+- If the crawler does not exist, it creates a new crawler targeting an S3 path.
+- Logs success or failure.
 
+  1. Function Signature:
+```rust
+  pub async fn create_crawler(
+     crawler_name: String,
+     path: String,
+     _greedy: bool,
+  ) -> Result<(), Box<dyn std::error::Error>>
+```
+`crawler_name: String` – The name of the crawler to be created.
+`path: String` – The S3 path where the data is stored.
+`_greedy: bool` – A boolean parameter (unused in the function now, but it may indicate whether to run the crawler aggressively).
+When `greedy: true` in the crawler configuration, it attempts to discover and catalog as much data as possible within a single run.
 
-<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=create_crawler.rs"></script>)
+`Return Type: Result<(), Box<dyn std::error::Error>>`
+  - If successful, it returns `Ok(())`.
+  - If an error occurs, it returns a boxed error.
 
+3. Preparing AWS Glue Client:
+```rust
+let _crawler_targets = path.clone();
+let iam_role = "arn:aws:iam::id:role/service-role/AWSGlueServiceRole-role".to_string();
+let config = aws_config::from_env().region(REGION).load().await;
+```
+`IAM Role`: The function sets up an IAM role ARN for AWS Glue to access data sources.
+`AWS Configuration:` It loads the AWS configuration (such as credentials, region) from environment variables asynchronously.
+Path Cloning: The `path.clone()` is used to avoid modifying the original string.
+
+3. Creating AWS Glue Client:
+```rust
+use aws_sdk_glue::Client;
+let glue = Client::new(&config);
+```
+AWS SDK Glue Client: The function initializes the AWS Glue client using the loaded configuration.
+
+4. Checking if Crawler Exists:
+```rust
+let get_crawler = glue
+   .get_crawler()
+   .name(crawler_name.clone())
+   .send()
+   .await
+   .unwrap();
+```
+It calls AWS Glue to check if a crawler with the given crawler_name already exists.
+The `.unwrap()` will panic if the request fails. As an improvement I think it's better for error handling to replace it with `?`.
+
+6. Determining if Crawler Should Be Created:
+```rust
+let must_create = match get_crawler {
+   GetCrawlerOutput {
+   crawler: Some(Crawler { name, .. }),
+   ..
+   } => match name {
+   Some(_crawler_name) => false,
+   _ => panic!("nothing here"),
+   },
+   _ => true,
+   };
+```
+This pattern-matching block checks the AWS response:
+- If the crawler exists (`Some(Crawler { name, .. })`), it returns false, meaning creation is not needed.
+- If the crawler does not exist (`_` case), it sets must_create to true, meaning a new crawler should be created.
+- If the name field is not found, it panics with `"nothing here"`, which is not a proper error handling but was working for years.
+It should be changed to 
+```rust
+None => {
+   eprintln!("Error: Crawler name not found in the response.");
+   return Err("Crawler name missing".into());
+}
+```
+or change the logic to using some default values like
+```rust
+let must_create = match name {
+    Some(_crawler_name) => false,
+    None => {
+        println!("Using default behavior since crawler name is missing.");
+        true
+    }
+};
+```
+6. Creating the Crawler If Needed:
+```rust
+if must_create {
+   let create_crawler = glue
+   .create_crawler()
+   .name(crawler_name.clone())
+   .database_name("database_name".to_string())
+   .role(iam_role)
+   .targets(
+   CrawlerTargets::builder()
+   .s3_targets(S3Target::builder().path(path).build())
+   .build(),
+   )
+   .send()
+   .await;
+   info!("create crawler success {:?}", create_crawler.unwrap())
+   } else {
+   info!("crawler already exists")
+   }
+```
+
+It builds an AWS Glue crawler with:
+`.name(crawler_name)`: The provided crawler name.
+`.database_name("database_name".to_string())`: The target AWS Glue database.
+`.role(iam_role)`: The IAM role ARN for Glue to assume.
+`.targets(...)`: Specifies S3 as the data source (provided path).
+Sends the create request and logs the success.
+Uses `.unwrap()` on the response, which may panic if there's an error.
+
+If Crawler Exists: if the program logs that the crawler already exists.
+
+7. Returning Success: `Ok(())`
+The function returns successfully if all operations complete without error.
 
 Then we need to start a crawler which was the tricky part: if the crawler has already started, it will produce an error and stop the program execution.
+For that we added a part for [waiting](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-start_crawler-rs)) with up to 20 attempts until the crawler was ready,
 
-For that we added a part for waiting with up to 20 attempts until the crawler was ready,
+What it does:
+
+- Starts an AWS Glue crawler by name.
+- Implements retries in case of a running crawler.
+- Handles various AWS Glue service errors (e.g., already running, not found, timeout).
+- Optionally waits for the crawler to finish before exiting.
+- Uses `std::thread::sleep(DELAY_TIME)` for retries.
+
+```rust
+pub async fn start_crawler(
+crawler_name: String,
+poll_to_completion: bool,
+) -> Result<(), Box<dyn std::error::Error>>
+```
+`crawler_name: String` – The name of the crawler to start.
+`poll_to_completion: bool` – A flag to determine if the function should wait for the crawler to complete its job or exit immediately.
+
+Return Type:
+
+`Result<(), Box<dyn std::error::Error>>` – Returns `Ok(())` if successful, or an error if something goes wrong.
+
+Load AWS Configuration:
+
+```rust
+let config = aws_config::from_env().region(REGION).load().await;
+let glue = aws_sdk_glue::Client::new(&config);
+```
+Loads AWS configuration settings using `aws_config::from_env()`.
+Creates an AWS Glue client using the loaded configuration.
+
+Retry Loop (Handling Failures):
+```rust
+let mut attempts = 0;
+loop {
+let start_crawler = glue.start_crawler().name(crawler_name.clone()).send().await;
+attempts += 1;
+```
+
+The function attempts to start the crawler in a loop and keeps track of how many attempts have been made using attempts, handling the responses in the different ways:
+
+```rust
+match start_crawler {
+    Ok(_) => {
+    println!("crawling away on {}", crawler_name);
+    break;
+}
+```
+If the crawler starts successfully `(Ok(_))`, it prints a message and exits the loop.
+
+If there is an error:
+```rust
+Err(crawler_error) => {
+    if let SdkError::ServiceError(err) = crawler_error {
+        match err.err() {
+```
+If an error occurs, the function checks if it's an AWS service error (`SdkError::ServiceError`).
+
+The function handles specific AWS Glue crawler errors:
+`CrawlerRunningException` (crawler already running):
+```rust
+StartCrawlerError::CrawlerRunningException(_) => {
+    info!("crawler update failed due to running state. bailing out.");
+    if !poll_to_completion {
+        info!("crawler failed. bailing out.");
+        break;
+    } else {
+        if attempts < 20 {
+            info!("crawler already running, retrying in 5 seconds")
+        } else {
+            panic!("crawler has tried 20 times. dying")
+        }
+    std::thread::sleep(DELAY_TIME);
+    }
+}
+```
+If `poll_to_completion` is false, it exits immediately.
+If `poll_to_completion` is true, it retries up to 20 times with a delay.
+
+`EntityNotFoundException` (crawler doesn't exist):
+
+```rust
+StartCrawlerError::EntityNotFoundException(_) => {
+    println!("not found")
+}
+```
+
+`OperationTimeoutException` (timeout error):
+
+```rust
+StartCrawlerError::OperationTimeoutException(_) => {
+    println!("timed out")
+}
+```
+
+`Unhandled` error types:
+
+```rust
+StartCrawlerError::Unhandled(_) => {
+    panic!("unhandled StartCrawlerErrorKind")
+}
+```
+
+Unknown (everything else)errors:
+
+```rust
+_ => {
+    println!("no idea")
+}
+```
+
+Polling Until Completion:
+
+```rust
+if poll_to_completion {
+    wait_for_crawler(&glue, &crawler_name).await?
+}
+```
+
+If `poll_to_completion` is true, it calls `wait_for_crawler()` to continuously check the crawler's status until it completes.
+
+Function Completion: `Ok(())`
+Once the crawler starts (or fails gracefully), the function returns Ok(()).
+Looking backwards I think it would be better to replace `std::thread::sleep` with `tokio::time::sleep(DELAY_TIME).await`, because the function is `async`, using `std::thread::sleep` may block the async runtime.
+It would happen as:
+When I call `std::thread::sleep`, it blocks the entire OS thread, meaning that:
+
+- The runtime cannot schedule other tasks on that thread while it's sleeping.
+- This can cause a significant slowdown, especially if the number of available worker threads is limited.
+- Other async tasks waiting to run may be delayed unnecessarily.
+
+But if I use `tokio` then it as other async runtimes, uses a thread pool to run tasks concurrently.
+
+[//]: # ()
+[//]: # (While writing this I decided to check what other async runtimes are available in Rust and created a short summary. )
+[//]: # (### Async Runtimes Comparison Summary)
+[//]: # ()
+[//]: # (| Runtime   | Best Use Case               | Key Feature                    | Ecosystem Support |)
+
+[//]: # ()
+[//]: # (|-----------|-----------------------------|--------------------------------|-------------------|)
+
+[//]: # ()
+[//]: # (| **Tokio**  | Web services, microservices  | Multi-threaded, feature-rich   | Excellent         |)
+
+[//]: # ()
+[//]: # (| **async-std** | CLI tools, general async apps | Standard library-like API     | Good              |)
+
+[//]: # ()
+[//]: # (| **smol**   | Lightweight, minimal apps    | Small footprint                | Moderate          |)
+
+[//]: # ()
+[//]: # (| **actix**  | Actor-based web apps         | Built-in actor model           | Great &#40;for web apps&#41; |)
+
+[//]: # ()
+[//]: # (| **bastion**| Fault-tolerant services      | Resilient supervision          | Moderate          |)
+
+[//]: # ()
+[//]: # (| **glommio**| High-performance I/O apps    | NUMA-aware runtime             | Specialized       |)
+[//]: # ()
+[//]: # ()
+[//]: # (| **embassy**| Embedded/IoT devices         | no_std async support           | Specialized       |)
+
+<details>
+  <summary><strong><em>While writing this I decided to check what other async runtimes are available in Rust and created a short summary</em></strong></summary>
+  <em>Comparison Summary</em>
+  <table>
+  <thead>
+    <tr>
+      <th>Runtime</th>
+      <th>Best Use Case</th>
+      <th>Key Feature</th>
+      <th>Ecosystem Support</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Tokio</strong></td>
+      <td>Web services, microservices</td>
+      <td>Multi-threaded, feature-rich</td>
+      <td>Excellent</td>
+    </tr>
+    <tr>
+      <td><strong>async-std</strong></td>
+      <td>CLI tools, general async apps</td>
+      <td>Standard library-like API</td>
+      <td>Good</td>
+    </tr>
+    <tr>
+      <td><strong>smol</strong></td>
+      <td>Lightweight, minimal apps</td>
+      <td>Small footprint</td>
+      <td>Moderate</td>
+    </tr>
+    <tr>
+      <td><strong>actix</strong></td>
+      <td>Actor-based web apps</td>
+      <td>Built-in actor model</td>
+      <td>Great (for web apps)</td>
+    </tr>
+    <tr>
+      <td><strong>bastion</strong></td>
+      <td>Fault-tolerant services</td>
+      <td>Resilient supervision</td>
+      <td>Moderate</td>
+    </tr>
+    <tr>
+      <td><strong>glommio</strong></td>
+      <td>High-performance I/O apps</td>
+      <td>NUMA-aware runtime</td>
+      <td>Specialized</td>
+    </tr>
+    <tr>
+      <td><strong>embassy</strong></td>
+      <td>Embedded/IoT devices</td>
+      <td>no_std async support</td>
+      <td>Specialized</td>
+    </tr>
+  </tbody>
+</table>
+
+These examples show implementation of a simple asynchronous HTTP server using different Rust async runtimes. The example will handle incoming requests and respond with a simple message.<br>
 
 
-<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=start_crawler.rs"></script>)
+1. <strong><em>Tokio</em></strong>
+<pre><code class="language-rust">
+use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+#[tokio::main]
+async fn main() {
+let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+println!("Listening on port 8080...");
+
+    loop {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        tokio::spawn(async move {
+            let mut buffer = [0; 1024];
+            socket.read(&mut buffer).await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from Tokio!").await.unwrap();
+        });
+    }
+}
+</code></pre>
+
+<em>Tokio</em> provides a powerful multi-threaded runtime.
+Best for high-performance web applications.
+Rich ecosystem with support for databases, networking, and concurrency utilities.
+Uses tasks and an I/O driver to handle concurrency efficiently.<br>
+
+2. <em>async-std</em>
+
+<pre><code class="language-rust">
+use async_std::net::TcpListener;
+use async_std::prelude::*;
+
+#[async_std::main]
+async fn main() {
+let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+println!("Listening on port 8080...");
+
+    while let Some(stream) = listener.incoming().next().await {
+        let mut stream = stream.unwrap();
+        async_std::task::spawn(async move {
+            let mut buffer = vec![0; 1024];
+            stream.read(&mut buffer).await.unwrap();
+            stream.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from async-std!").await.unwrap();
+        });
+    }
+}
+</code></pre>
+<em>async-std</em> provides a standard library API for async programming.
+Best for simpler async applications and CLI tools.
+Has a simpler API compared to Tokio but less optimized for high throughput.
+Built on top of <em>async-io</em>.<br>
+
+3. <em>smol</em>
+<pre><code class="language-rust">
+use smol::net::TcpListener;
+use smol::prelude::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    smol::block_on(async {
+    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    println!("Listening on port 8080...");
+
+        while let Some(stream) = listener.incoming().next().await {
+            let mut stream = stream?;
+            smol::spawn(async move {
+                let mut buffer = vec![0; 1024];
+                stream.read(&mut buffer).await.unwrap();
+                stream.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from Smol!").await.unwrap();
+            }).detach();
+        }
+        Ok(())
+    })
+}
+</code></pre>
+
+<em>Smol</em> is minimal and designed for lightweight applications.
+Great for embedded devices or minimal environments.
+Fewer dependencies compared to <em>Tokio</em> and <em>async-std</em>.
+Uses thread-pool only when necessary.<br>
+
+4. <em>Actix</em>
+<pre><code class="language-rust">
+use actix_web::{web, App, HttpServer, Responder};
+
+async fn hello() -> impl Responder {
+    "Hello from Actix!"
+}
+
+#[actix_web::main]
+async fn main() -> std::io::Result<()> {
+    HttpServer::new(|| App::new().route("/", web::get().to(hello)))
+        .bind("127.0.0.1:8080")?
+        .run()
+        .await
+    }
+</code></pre>
+
+<em>Actix</em> is actor-based and well-suited for highly concurrent web apps.
+Excellent performance in handling web requests compared to other runtimes.
+Built on Tokio but provides an abstraction layer with actors for better concurrency.
+Has built-in middleware support for web development.<br>
+
+5. <em>Bastion</em>
+<pre><code class="language-rust">
+use bastion::prelude::*;
+use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+#[tokio::main]
+async fn main() {
+Bastion::init();
+Bastion::start();
+
+    let _ = Bastion::supervisor(|sp| {
+        sp.children(|ch| {
+            ch.with_exec(move |ctx| {
+                async move {
+                    let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+                    while let Ok((mut socket, _)) = listener.accept().await {
+                        socket.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from Bastion!").await.unwrap();
+                    }
+                    Ok(())
+                }
+            })
+        })
+    });
+
+    Bastion::block_until_stopped();
+}
+</code></pre>
+
+Bastion is designed for high availability and resilience using the supervisor model.
+Provides built-in fault tolerance, restarts, and message passing.
+Best for critical services that require fault isolation.<br>
+
+6. <em>Glommio</em>
+<pre><code class="language-rust">
+use glommio::{net::TcpListener, LocalExecutor};
+
+fn main() {
+    let ex = LocalExecutor::default();
+    ex.run(async {
+    let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+    while let Ok(mut stream) = listener.accept().await {
+        stream.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from Glommio!").await.unwrap();
+        }
+    });
+}
+</code></pre>
+
+Glommio is designed for high-performance workloads on NUMA architectures. (UMA (Non-Uniform Memory Access) awareness refers to optimizing software to efficiently utilize the architecture of modern multi-socket and multi-core systems where memory access times vary depending on the processor accessing it. )
+It provides a thread-per-core model to minimize context switching.
+Best for low-latency, high-throughput applications.<br>
+
+7. <em>Embassy</em>
+<pre><code class="language-rust">
+#![no_std]
+#![no_main]
+
+use embassy_executor::Spawner;
+use embassy_net::{tcp::TcpSocket, Stack};
+
+#[embassy_executor::main]
+async fn main(spawner: Spawner) {
+    let mut stack = Stack::new();
+    let socket = TcpSocket::new(&stack);
+    socket.accept().await.unwrap();
+    socket.write_all(b"Hello from Embassy!").await.unwrap();
+}
+</code></pre>
+
+Embassy is a <em>no_std</em> async runtime for embedded systems.
+Optimized for resource-constrained environments.
+Requires specific hardware setups like RTOS or bare-metal.<br>
+
+</details>
 
 
-####  Query:
+Now we came to the point -how to call the tasks, aws functions etc?
+For that we have directory `procject_cli` with `lib.rs` and `main.rs` files, which are structured to define and run data processing tasks related to handling Postgres data, processing it, and uploading the results to AWS S3:
 
-Using AWS Glue, I crawled the Parquet files to make them queryable. Athena was then used to query the data efficiently.
+`procject_cli/src/lib.rs`
+This file acts as the library module, providing reusable components and configurations for your application.
+
+```rust
+extern crate openssl;
+extern crate diesel;
+```
+These external crates provide SSL and database functionality.
+
+Argument Parsing (Args Struct):
+
+```rust
+pub struct Args {
+    pub arg_POSTGRES_URI: String,
+    pub flag_table: String,
+    pub flag_limit: usize,
+    pub flag_upload: String,
+    pub flag_file: String,
+    pub flag_kevel: String,
+    pub flag_netsuite: String,
+}
+```
+This struct is used to capture command-line arguments for database URI, table name, file upload settings, and limits.
+
+```rust
+pub const USAGE: &str = "
+project
+
+Usage:
+  project (<POSTGRES-URI>) [--table=<table>] [--upload=<S3_URL>] [--file=<file>] [--extra=<file>]
+
+Options:
+  -l --limit=<LIMIT>    Number of documents per request [default: 1000]
+  -h --help             Show this screen.
+  -t --table=<TABLE>    Postgres table to process
+  -u --upload=<S3_URL>  Target file [default: s3://bucket]
+  -n --no-upload        Skip uploading to S3
+  -b --file=<file>      Shows to use factors
+  -k --extra=<file>     Shows to run extra data load
+";
+```
+Provides a help message when running the command-line interface (CLI).
+
+Task Management:
+```rust
+fn tasks_list() -> Vec<(&'static str, Box<dyn ProjectTask>)> {
+    let tasks: Vec<(&str, Box<dyn ProjectTask>)> = vec![
+    ("combined_orders", Box::new(project_tasks::tasks::CombinedOrderTask {})),
+    ....
+    ];
+    tasks
+}
+```
+This function returns a list of tasks that will be executed, each encapsulated in a dynamic trait object (`Box<dyn ProjectTask>`).
+
+`project_cli/bin/main.rs`
+The `main.rs` file serves as the entry point for the application and handles the execution of tasks.
+- Command-line arguments are passed to specify Postgres details and file upload options.
+- The application reads data from Postgres, processes it in parallel using Rayon.
+- Results are written to Parquet files locally and uploaded to S3.
+- AWS Glue crawlers are triggered to catalog the data.
+- Errors and events are logged via Sentry and `pretty_env_logger`.
+
+`all()` Function:
+This function runs all tasks and uploads the results to S3.
+
+Argument Parsing:
+```rust
+let args: Args = Docopt::new(USAGE)
+    .and_then(|d| d.deserialize())
+    .unwrap_or_else(|e| e.exit());
+```
+The command-line arguments are parsed using the Docopt library.
+
+Task Execution Loop:
+
+```rust
+for (name, task) in tasks {
+    println!("{:?} task ", name);
+    let result = panic::catch_unwind(|| {
+    let project_result = task.run(
+        utf8_percent_encode(args.arg_POSTGRES_URI.as_str(), DEFAULT_ENCODE_SET)
+        .to_string()
+        .as_str(),
+        );
+    });
+}
+```
+Each task is run inside a `panic::catch_unwind()` to prevent crashes from propagating.
+
+S3 Upload Handling:
+```rust
+tokio::task::spawn(async move {
+    upload(project_file.into(), BASE_PATH, path.as_str())
+    .await
+    .expect("upload file to s3 from all - must work");
+});
+```
+Files are uploaded asynchronously to AWS S3.
+
+Error Handling:
+If a task fails, it's logged and reported to Sentry:
+```rust
+if result.is_err() {
+    let message = format!("project GOT Panic! in {} file", name);
+    sentry::capture_message(message.as_str(), sentry::Level::Warning);
+}
+```
+
+`main()`
+The entry point of the program, where the execution begins.
+
+Initializes `OpenSSL` for static builds and sets up logging:
+
+```rust
+openssl_probe::init_ssl_cert_env_vars();
+pretty_env_logger::init();
+```
+
+Initialize Sentry for error tracking:
+```rust
+let _guard = sentry::init((
+    "https://..@..ingest.sentry.io/..?timeout=10,verify_ssl=0",
+    sentry::ClientOptions {
+    release: sentry::release_name!(),
+    environment: Some("production".into()),
+        ..Default::default()
+    },
+));
+```
+Thread Pool Setup:
+```rust
+::rayon::ThreadPoolBuilder::new()
+    .num_threads(2)
+    .build_global()
+    .unwrap();
+```
+Uses the Rayon library to enable parallel processing of tasks.
+
+Conditionally Running Tasks Based on `flag_table`:
+
+If the flag is "all", it runs all tasks and uploads data.
+If it's "stream_tasks", a different set of tasks is run.
+```rust
+if args.flag_table == "all" {
+    let (_size, count) = all(args.flag_table);
+    
+    create_crawler(CRAWLER_NAME.to_string(), s3_path, true)
+    .await
+    .expect("create crawler");
+    start_crawler(CRAWLER_NAME.to_string(), true)
+    .await
+    .expect("start crawler");
+
+} else if args.flag_table == "stream_tasks" {
+    let (_size, count) = stream_tasks().await;
+    
+    create_crawler(CRAWLER_NAME_ONE.to_string(), s3_path, true)
+    .await
+    .expect("create crawler");
+    start_crawler(CRAWLER_NAME_ONE.to_string(), true)
+    .await
+    .expect("start crawler");
+}
+```
+
+
+
+
+[//]: # (####  Query:)
+
+[//]: # ()
+[//]: # (Using AWS Glue, I crawled the Parquet files to make them queryable. Athena was then used to query the data efficiently.)
 
 
 ## Pros of This Approach
