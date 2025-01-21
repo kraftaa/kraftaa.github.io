@@ -1878,7 +1878,7 @@ if args.flag_table == "all" {
 [//]: # (Using AWS Glue, I crawled the Parquet files to make them queryable. Athena was then used to query the data efficiently.)
 
 
-## Pros of This Approach
+## Pros of This ETL Approach
 
 Improved Security:
 
@@ -1904,6 +1904,8 @@ Ease of Querying:
 
 
 By integrating with AWS Glue and Athena, I could query enriched data using SQL without additional infrastructure.
+
+A lot of Rust learning :) 
 
 ### Cons of This Approach
 
