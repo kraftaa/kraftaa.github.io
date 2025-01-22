@@ -8,6 +8,23 @@ tags: [Rust, AWS, S3, Postgres]
 _Work in progress_
 &nbsp;
 
+## Table of Contents
+- [Problem](#problem)
+- [The Solution](#the-solution)
+    - [Mermaid ETL](#mermaid-etl-chart)
+    - [Rust Program](#rust-program)
+      - [Members](#members)
+      - [Schema](#schema)
+      - [Tasks](#tasks)
+      - [Parquet Writer](#parquet-writer)
+
+[//]: # (      - [Traits]&#40;#traits&#41;)
+
+[//]: # (      - [AWS Module]&#40;#aws-module&#41;)
+
+[//]: # (    - [Subsection of Main Idea 2]&#40;#subsection-of-main-idea-2&#41;)
+
+# The idea
 ## Problem:
 
 This project began several years ago as a solution to a pressing need for providing data for company reporting in the absence of an established ETL process. The production data resided in a Postgres RDS database, but generating reports directly from 
@@ -36,7 +53,10 @@ Incorporating derived fields and merging data from multiple tables resulted in o
 Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) processes was considered expensive at that time.
 
 
-# The Solution: ETL with Rust + Parquet + S3 + Glue + Athena
+# The Solution: 
+ETL with Rust + Parquet + S3 + Glue + Athena
+
+## Mermaid ETL chart
 
 {% mermaid %}
 graph TD;
@@ -94,6 +114,7 @@ AWS Glue provides a mechanism for partitioning and indexing with the limitations
 - only integer and strings could be used as an index
 
 
+### Members
 
 Rust program workspace had the next members:
 ```rust
@@ -115,7 +136,7 @@ Why this project structure?
 
 It was designed to allow for the separation of tasks and crates in Cargo.toml. This separation enabled me to build and manage each component independently, avoiding unnecessary complexity and loading all the crates in once, each . It also provided better visibility into the performance of individual areas, making it easier to track and optimize and fix each part of the system.
 
-
+### Schema
 #### Struct/Table Representation in Rust are in **_project_schemas_**
 
 In order to read the tables and perform some calculations and also to ensure type safety  I had to map each Postgres table to a corresponding Rust struct. Initially, this mapping was done manually, but later I discovered the powerful _**diesel_ext**_ crate (later [_**diesel_cli_ext**_](https://crates.io/crates/diesel_cli_ext)), which allowed me to automatically map the schema from Postgres to Rust structs. I still had to create diesel _table!_ macro definition which I automate with the help of _bash_ script:
@@ -227,6 +248,9 @@ project_schemas
 ├── tables
 └── models
 ```
+
+### Tasks
+
 Then I had to combine all the data, add some calculations, write the result into parquet file and upload to S3 into the designated busket/folder.
 
 First we need to bring modules and structs into the scope of our `combined_orders.rs` task.
@@ -653,6 +677,9 @@ Now we have:
     Retrieves the number of rows written to the file.
     **_(path.into(), rows_number):_**
     Returns the file path and the number of rows as the output of the task.
+
+
+### Parquet Writer
 
 In order to be able to write files into parquet I'm using the crates `parquet` and `parquet_derive` as well as extra methods from `project_parquet` defined by us:
 
