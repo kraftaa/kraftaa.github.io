@@ -16,6 +16,7 @@ _Work in progress_
       - [Members](#members)
       - [Schema](#schema)
       - [Tasks](#tasks)
+      - [Streaming Tasks](#streaming-tasks)
       - [Parquet Writer](#parquet-writer)
 
 [//]: # (      - [Traits]&#40;#traits&#41;)
@@ -678,6 +679,250 @@ Now we have:
     **_(path.into(), rows_number):_**
     Returns the file path and the number of rows as the output of the task.
 
+### Streaming Tasks
+
+Because our program started from reading small-normal size tables we started using **_Diesel_**, but then we got hit by program getting OOM or getting into the conflict with RDS instance due to loading the huge volume of data at once from the big tables.
+To handle that some tasks were recreated using **_sqlx_** crate, which was used for asynchronously reading large tables from a PostgreSQL, processing the data, and writing it to a Parquet file format.
+
+Why Use **_sqlx_** Instead of diesel for Large Tables?
+
+**Asynchronous Database Access (Key Advantage):** 
+
+- **_sqlx_** provides **_async_**/**_await_** support, which allows for non-blocking database operations.
+This is crucial for handling large datasets, as it enables efficient streaming and processing without blocking the main thread, improving throughput and scalability.
+In contrast, _**diesel**_ primarily uses synchronous operations, which can cause blocking issues when working with large datasets.
+
+**Efficient Streaming of Large Data:**
+
+The code uses **_sqlx::query_as_** and **_.fetch(&pool)_** to stream results.
+Streaming helps in processing large tables in chunks instead of loading everything into memory at once.
+
+**Lightweight and Compile-time Checked Queries**
+
+**_sqlx_** offers compile-time SQL query verification with strong typing, ensuring correctness and performance optimization at build time.
+_**Diesel**_ often requires complex query-building and lacks full async support.
+
+**Flexibility with Dynamic Queries**
+
+_**sqlx**_ allows direct string-based SQL queries (**_query_as::<sqlx::Postgres, RequestRecordStream>(&query);_**), making it easier to work with dynamic queries.
+**Diesel**'s ORM-like approach can be restrictive when working with dynamically changing query structures.
+
+In the example below I'm constructing the query with extra fields via 
+```rust
+query.push_str(fields);
+```
+It's also possible to add conditions 
+```rust
+async fn fetch_users(pool: &PgPool, filters: HashMap<&str, &str>) -> Result<Vec<User>> {
+    let mut query = "SELECT id, name, email FROM users WHERE 1=1".to_string();
+
+    if let Some(min_date) = filters.get("min_date") {
+        query.push_str(&format!(" AND date >= '{}'", min_date));
+    }
+
+    let exclude_domains = vec!["example.com", "example2.com"];
+    for domain in &exclude_domains {
+        query.push_str(&format!(" AND email NOT LIKE '%@{}'", domain));
+    }
+    let users = sqlx::query_as::<_, User>(&query)
+        .fetch_all(pool)
+        .await?;
+
+    Ok(users)
+}
+#[tokio::main]
+async fn main() -> Result<()> {
+    // Database connection
+    let pool = PgPool::connect("postgres://user:password@localhost/dbname").await?;
+
+    // Example filters (simulate user input)
+    let mut filters = HashMap::new();
+    filters.insert("min_date", "2025-01-15");
+    // Fetch users based on dynamic filters
+    let users = fetch_users(&pool, filters).await?;
+```
+where `WHERE 1=1` allows appending conditions without worrying about the first AND clause.
+Conditions are added based on available filters (email, min_date). If additional filters are added, the query adapts accordingly.
+The query string is built dynamically at runtime. 
+
+when with Diesel it would look like
+```rust
+use diesel::prelude::*;
+use my_project::schema::users::dsl::*;
+
+fn fetch_users(conn: &PgConnection, user_name: Option<&str>, user_email: Option<&str>) -> Vec<User> {
+    let mut query = users.into_boxed(); // Allows dynamic query construction
+
+    if let Some(name) = user_name {
+        query = query.filter(name.eq(name));
+    }
+
+    if let Some(email) = user_email {
+        query = query.filter(email.eq(email));
+    }
+
+    query.load::<User>(conn).expect("Error loading users")
+}
+```
+So for each extra filter value in Diesel I need to write extra code, when for the each extra filter value in sqlx I just add the filter line to the code.
+
+sqlx allows: 
+- String-Based Query Construction: I can construct queries dynamically without predefined schema definitions.
+- Flexibility with Input: Supports building queries based on user-provided filters without writing multiple query versions.
+- No Compile-Time Schema Enforcement(very important if I want to check what I'm getting): Unlike Diesel, sqlx allows running ad-hoc queries without defining schema structs.
+
+For **_sqlx_**  I have traits `ProjectStreamTask` and `HugeStreamTask`  which define an interface to run asynchronous tasks that interact with PostgreSQL and return results.
+They enforce that implementing structs must be **_Send + Sync + Debug + UnwindSafe_**, ensuring thread safety and error resilience.
+```rust
+#[async_trait]
+pub trait ProjectStreamTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
+    async fn run(&self, postgres_uri: &str) -> (String, i64);
+}
+
+#[async_trait]
+pub trait HugeStreamTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
+    async fn run(&self, postgres_uri: &str) -> Vec<(NaiveDate, PathBuf, u128, i64)>;
+}
+```
+In the streaming task the **_RequestRecordStream_** struct, derived with **_ParquetRecordWriter_** and **_sqlx::FromRow_**, and **_Default_** and **_Debug_** which provide automatic implementations of functionalities that help with extracting struct field names, fetching data from Postgres and writing it to Parquet files.
+
+**_sqlx::FromRow_**  derive macro enables the struct to be used with SQLx to map database query results directly into Rust structs.
+
+It allows SQLx to deserialize rows from a database query into instances of **_RequestRecordStream_**.
+
+For example, using this query SQLx will automatically map the database columns to the corresponding struct fields.
+```
+let result = sqlx::query_as::<sqlx::Postgres, RequestRecordStream>(&query).fetch(&pool);
+```
+**_ParquetRecordWriter_**  derive macro enables automatic writing of struct instances to Parquet files.
+
+**_Default_** derive macro provides a way to create a default value for a struct (or other types) when no specific values are provided.
+
+When the **_Default_** trait is derived, Rust will automatically generate an implementation for it that initializes all struct fields with their respective default values.
+Default values for standard types in Rust:
+```rust
+i64 → 0
+Option<T> → None
+String → "" (empty string)
+Vec<T> → empty vector vec![]
+bool → false
+..
+```
+
+This task:
+```rust
+pub async fn requests(pg_uri: &str) -> anyhow::Result<(String, i64)> {
+```
+1. Connecting to PostgreSQL 
+```rust
+let pool = PgPool::connect(pg_uri).await?;
+```
+
+Creating a Placeholder Struct Instance: This creates a vector with a default instance of RequestRecordStream to:
+- Simulate a dataset structure.
+- Use it for schema introspection to dynamically build the query.
+```rust
+  let fake_requests = vec![RequestRecordStream {
+    ..Default::default()
+  }];
+
+```
+Why do I need this placeholder? Because this placeholder struct instance is used to introspect the schema of RequestRecordStream dynamically. In Rust, struct fields aren't accessible at runtime in the same way as in dynamic languages (e.g., Python). Instead, I need to create an instance of the struct to analyze its fields and types.
+The struct **_RequestRecordStream_** is annotated with **_#[derive(ParquetRecordWriter, sqlx::FromRow)]._** These derive macros enable schema extraction.
+Creating a default instance (**_..Default::default()_**) allows access to the schema, which is used later in the code to generate a list of database columns.
+
+Since the struct fields represent database columns, creating an instance helps dynamically determine column names required for query building.
+Without this, I would need to hard-code column names (like in the 'normal' tasks described above), which reduces flexibility.
+
+The obvious advantages:
+- If the struct definition changes (e.g., new fields are added), the introspection ensures that the SQL query automatically adapts, avoiding manual updates.
+- the program avoids errors as without creating an instance, trying to access field names programmatically would lead to compilation errors because Rust’s type system doesn't allow reflection like dynamically typed languages.
+
+Extracting Schema Information from the Struct
+```rust
+let vector_for_schema = &fake_requests;
+let schema = vector_for_schema.as_slice().schema().unwrap();
+let schema_2 = vector_for_schema.as_slice().schema().unwrap();
+let schema_vec = schema_2.get_fields();
+```
+The code extracts schema details from the sample data.
+**_vector_for_schema.as_slice().schema().unwrap()_** retrieves schema metadata, such as field names and types.
+**_schema_vec = schema_2.get_fields();_** gets a list of fields (columns) for further processing.
+
+Building Field Names for SQL Query
+```rust
+let mut fields: Vec<&str> = vec![];
+for i in schema_vec {
+    if i.name() == "uuid" {
+        fields.push("uuid::varchar") // because parquet wasn't supporting uuid writing
+    } else if .. {
+        ... 
+    } else {
+        fields.push(i.name())
+    }
+}
+println!("{:?} fields!", fields);
+```
+This loop iterates over all schema fields and dynamically constructs SQL-friendly field names:
+- If the field is named _uuid_, it converts it to **_uuid::varchar_** to ensure proper type handling in SQL queries.
+- Other fields are pushed as-is.
+The final field list is printed for debugging purposes.
+
+Setting Up Parquet File Writing
+```rust
+let requests_load = Instant::now();
+let path = "/tmp/requests.parquet";
+let path_meta = <&str>::clone(&path);
+
+let file = std::fs::File::create(path).unwrap();
+let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
+```
+_**Instant::now()**_ tracks how long the operation takes.
+A Parquet file path is defined as **_"/tmp/requests.parquet"_**.
+The file is created using **_std::fs::File::create(path)_**.
+A Parquet writer (_**SerializedFileWriter**_) is initialized with the schema and file properties.
+
+Constructing the SQL Query
+```rust
+let table: &str = "requests";
+
+let mut query = "SELECT ".to_owned();
+let fields: &str = &fields.join(", ");
+query.push_str(fields);
+query.push_str(" FROM ");
+query.push_str(table);
+```
+A _**SELECT**_ query is dynamically built by concatenating the extracted field names and ppending the table name (_requests_).
+
+Query Execution with SQLX (**_query_as_**): Executes the SQL query asynchronously and streams results.
+
+```rust
+let result = sqlx::query_as::<sqlx::Postgres, RequestRecordStream>(&query);
+let requests_stream = result.fetch(&pool);
+```
+
+
+Processing Data in Chunks (5000 rows at a time): Streams rows from the database and writes them to a Parquet file in chunks.
+```rust
+let mut chunk_stream = requests_stream.map(|fs| fs.unwrap()).chunks(5000);
+while let Some(chunks) = chunk_stream.next().await {
+    let mut row_group = pfile.next_row_group().unwrap();
+    (&chunks[..])
+        .write_to_row_group(&mut row_group)
+        .expect("can't write_to_row_group");
+    pfile.close_row_group(row_group).unwrap();
+}
+```
+
+Trait Implementation (RequestStreamingTask): Implements the trait to run the task that fetches data and stores it.
+```rust
+#[async_trait]
+impl ProjectStreamingTask for RequestStreamingTask {
+    async fn run(&self, postgres_uri: &str) -> (String, i64) {
+        requests(postgres_uri).await.unwrap()
+    }
+}
+```
 
 ### Parquet Writer
 
@@ -1731,7 +1976,7 @@ Now we came to the point -how to call the tasks, aws functions etc?
 For that we have directory `procject_cli` with `lib.rs` and `main.rs` files, which are structured to define and run data processing tasks related to handling Postgres data, processing it, and uploading the results to AWS S3:
 
 `procject_cli/src/lib.rs`
-This file acts as the library module, providing reusable components and configurations for your application.
+This file acts as the library module, providing reusable components and configurations for my application.
 
 ```rust
 extern crate openssl;
