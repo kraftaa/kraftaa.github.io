@@ -143,30 +143,33 @@ It was designed to allow for the separation of tasks and crates in Cargo.toml. T
 
 In order to read the tables and perform some calculations and also to ensure type safety  I had to map each Postgres table to a corresponding Rust struct. Initially, this mapping was done manually, but later I discovered the powerful _**diesel_ext**_ crate (later [_**diesel_cli_ext**_](https://crates.io/crates/diesel_cli_ext)), which allowed me to automatically map the schema from Postgres to Rust structs. I still had to create diesel _table!_ macro definition which was automated with the help of _bash_ script:
 
-```commandline
+```shell
 SELECT column_name, data_type, is_nullable
 FROM information_schema.columns
 WHERE table_name = 'orders';
 ```
 which was giving me 
 ```shell
-           column_name           |          data_type          | is_nullable 
----------------------------------+-----------------------------+-------------
- id                              | integer                     | NO
- active                          | boolean                     | NO
- name                            | character varying           | YES
- created_at                      | timestamp without time zone | NO
- data                            | jsonb                       | YES
+ column_name |          data_type          | is_nullable 
+---------------------------------+------------------------
+ id          | integer                     | NO
+ active      | boolean                     | NO
+ name        | character varying           | YES
+ created_at  | timestamp without time zone | NO
+ data        | jsonb                       | YES
  ...
 ```
-which together with this bash script would give diesel _table!_ macro definition:
-<div class="code-container">
+which together with this bash script would give diesel  [_table!_macro definition](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-table_macro-sh) definition.
 
-  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=table_macro.sh"></script>
+[//]: # (<div class="code-container">)
 
-</div>
+[//]: # ()
+[//]: # (  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=table_macro.sh"></script>)
 
-and the definition would be:
+[//]: # ()
+[//]: # (</div>)
+
+and the final definition would be:
 ```shell
 table! {
     orders (id) {
@@ -195,16 +198,15 @@ I created also a _**template_task**_ which was a blue-print for most tasks and u
 This streamlined the process significantly, allowing efficient table mapping and the integration of the database schema into Rust code with minimal manual intervention.
 
 
-Here’s the Makefile command that does all of this:
+Here’s the [Makefile](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_model-rs)  command that does all of this.
 
+[//]: # (<div class="code-container">)
 
-Makefile
+[//]: # ()
+[//]: # (  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=create_model.rs"></script>)
 
-<div class="code-container">
-
-  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=create_model.rs"></script>
-
-</div>
+[//]: # ()
+[//]: # (</div>)
 
 This approach saved considerable time and reduced the chance of errors with types/nullables by automating the mapping process.
 
@@ -237,11 +239,33 @@ Here’s an example of some Postgres tables, corresponding structs and the task 
 | 2  | product2 | 70       | 2023-01-20 | false    | 41.05 |
 | 3  | product3 | 2        | 2023-01-20 | true     | 11.05 |
 
-To combine these tables and add calculated fields, the Rust program used the following structs:
+To combine these tables and add calculated fields, the Rust program used the following [structs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-tables_structs-rs) which looked like this:
+```rust
+// orders_tl.rs for Postgres diesel schema
+table! {
+    orders (id) {
+        id -> Int4,
+        user_id -> Nullable<Int4>,
+        amount -> Nullable<BigDecimal>,
+        created_at -> Nullable<Timestamp>,
+        uuid -> Uuid,
+    }
+}
 
-
-<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tables_structs.rs"></script>
-
+// order.rs for the struct
+use uuid::Uuid;
+use bigdecimal::BigDecimal;
+use chrono::NaiveDateTime;
+#[derive(Queryable, Debug)]
+pub struct Order {
+    pub id: i32,
+    pub user_id: Option<i32>,
+    pub amount: f64,
+    pub created_at: Option<NaiveDateTime>,
+    pub uuid: Uuid,
+}
+```
+[//]: # (<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tables_structs.rs"></script>)
 
 The table and struct definitions were organized within the _**project_schemas**_ directory. This directory included the tables and models subdirectories, each housing the respective definitions. Additionally, a **_mod.rs_** file was used to list and manage all the tables and models for easier access and modularity.
 

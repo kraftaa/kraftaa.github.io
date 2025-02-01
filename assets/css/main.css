@@ -786,7 +786,8 @@ h1 {
 }
 
 img {
-  max-width: 90%;
+  max-width: 100%;
+  /*max-width: 90%;*/
   vertical-align: middle;
   display: inline-block;
 }
@@ -1244,9 +1245,9 @@ a.newer-posts:hover {
 }
 
 .page-cover-image .page-image {
-  width: 90%;
-  height: 90%;
-}
+  width: 100%; /* 90%; */
+  height: 100%; /* 90%; */
+/*}*/
 
 .page-footer {
   display: -webkit-box;
@@ -1525,17 +1526,17 @@ a.newer-posts:hover {
   }
 }
 
-details p {
-  font-size: 16px;
-}
+/*details p {*/
+/*  font-size: 16px;*/
+/*}*/
 
-details em {
-  font-style: italic;
-}
+/*details em {*/
+/*  font-style: italic;*/
+/*}*/
 
-details strong {
-  font-weight: bold;
-}
+/*details strong {*/
+/*  font-weight: bold;*/
+/*}*/
 
 /*.highlight {*/
 /*  background-color: #f6f8fa;  !* Light gray background *!*/
@@ -1554,7 +1555,7 @@ details strong {
 /*  margin-bottom: 5px;*/
 /*}*/
 
-pre {
-  margin: 0;
-  white-space: pre-wrap; /* Keeps line breaks and spaces */
-}
+/*pre {*/
+/*  margin: 0;*/
+/*  white-space: pre-wrap; !* Keeps line breaks and spaces *!*/
+/*}*/
