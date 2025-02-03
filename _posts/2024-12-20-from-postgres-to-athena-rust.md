@@ -19,40 +19,29 @@ _Work in progress_
       - [Streaming Tasks](#streaming-tasks)
       - [Parquet Writer](#parquet-writer)
 
-[//]: # (      - [Traits]&#40;#traits&#41;)
-
-[//]: # (      - [AWS Module]&#40;#aws-module&#41;)
-
-[//]: # (    - [Subsection of Main Idea 2]&#40;#subsection-of-main-idea-2&#41;)
-
-# The idea
-## Problem:
+# Problem:
 
 This project began several years ago as a solution for providing data for company reporting in the absence of an established ETL process. The production data resided in a Postgres RDS database, but generating reports directly from 
-the primary instance was not an option. Doing so would have imposed additional load on the main application and required additional roles to handle live production data.
+the primary instance was not considered as an option. Doing so would have imposed additional load on the main application and required additional roles to handle live production data.
 
 Moreover, we needed to perform complex computations and aggregations and store the processed results for subsequent use in reporting. While Postgres was great for handling transactional workloads, we faced some challenges when tasked with heavy computations and data enrichment.
 And we didn't want to store all the calculated fields in Postgres which would denormalize the tables.
 
-
-## Security Concerns:
+#### Security Concerns:
 
 We did not want to give direct access to the Postgres RDS instance to other services or users. Instead, we wanted a secure and controlled way to read data, transform it, and expose only selected results. Access was restricted to calls made only via a program (API calls) for security.
 
-
-## Performance Issues:
+#### Performance Issues:
 
 Running complex calculations directly on the Postgres instance each time the user was opening the report or filtering it was affecting query performance for the main application.
 
-
-## Operational Complexity:
+#### Operational Complexity:
 
 Incorporating derived fields and merging data from multiple tables resulted in overly complex schemas for views and queries, making them increasingly difficult to manage and maintain. Additionally, several machine learning computations needed to be performed on the production data, but running these directly on live data was not feasible.
 
+#### Cost Concerns:
 
-## Cost Concerns:
-
-Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) processes was considered expensive at that time.
+Scaling the Postgres instance to handle heavy _ETL (Extract, Transform, Load)_ processes was considered expensive at that time.
 
 
 # The Solution:
@@ -73,48 +62,41 @@ AWSAthena -->|Used in| Reports[Reports];
 </div>
 
 
-Instead of performing everything within Postgres, we built an ETL pipeline with Rust, AWS S3, GLue and Athena.
+Instead of performing everything within Postgres, we built **_an ETL pipeline with Rust, AWS S3, AWS Glue and AWS Athena._**
 
 
-This Rust project was originally initiated by my colleague and Rust wizard, [Xavier](https://github.com/xrl). His guidance and expertise helped me not only get started with Rust but also truly appreciate its beauty, power, and advantages. Thanks to his mentorship, I’ve come to love working with Rust and have seen firsthand how it can transform complex workflows (or make it even more complex but blazing fast :wink: ) .
+This **_Rust_** project was originally initiated by my colleague and Rust wizard, [Xavier](https://github.com/xrl). His guidance and expertise helped me not only get started with Rust but also truly appreciate its beauty, power, and advantages. Thanks to his mentorship, I’ve come to love working with Rust and have seen how it can transform complex workflows (or make it even more complex but blazing fast :wink: ).
 
 
-Here’s how it worked:
+### ETL overview:
 
-
-## Rust Program:
+**_Rust program:_**
 
 The program fetched data from Postgres, performed transformations (including derived fields and joins across tables), and saved the output in Parquet format.
+UsingRust allowed us to optimize performance and maintain type safety by representing tables as Rust _structs_.
 
-Using Rust allowed us to optimize performance and maintain type safety by representing tables as Rust structs.
-
-Rust's type-checking served as a safeguard for ensuring the integrity of production data. If the production system encountered any invalid values or NaNs, the Rust process would immediately detect the issue and send an error notification, helping to maintain data accuracy and reliability.
-
-
+Rust's type-checking served as a safeguard for ensuring the integrity of production data. If the production system encountered any invalid values or _NaN_, the Rust process would immediately detect the issue and send an error notification, helping to maintain data accuracy and reliability.
 The Rust program was deployed in a Kubernetes environment using a Helm chart. The chart configured a service account with the appropriate role-based access to AWS services, including S3 and Glue. Additionally, the Helm chart utilized a Kubernetes secret to securely manage the connection credentials for the RDS instance.
 
-
-Parquet Files on S3:
-
+**_Parquet Files on S3:_**
 
 Transformed data was stored in an S3 bucket in a columnar Parquet format. This reduced storage costs and improved query efficiency.
 
-
-AWS Glue + Athena:
-
+**_AWS Glue + Athena:_**
 
 AWS Glue was used to crawl the Parquet files on S3 and create metadata.
 
 Athena provided a cost-efficient way to query the data using SQL. Bear in mind that Athena doesn't create real tables or materialized views, it only creates a metadata and reads everything from the file, stored in S3.
 The reports leveraged Athena tables and views as the foundation for data visualization.
-The cons of such approach are that it is possible to delete underlying file without getting any warnings/restrictions about dependant views, tables etc.
-Athena also doesn't provide indexing as it's just a querying tool with its own flavor PrestoDB, it's lacking some Postgres methods and doesn't allow recursive functions as well as true **_materialized views_**. It also doesn't support ***CREATE TABLE LIKE*** or ***DELETE FROM*** or ***UPDATE***, but it allows to give an access to query a table without a fear that the table would be dropped as behind a hood it's a file in s3.
-AWS Glue provides a mechanism for partitioning and indexing with the limitations: 
+The cons of such approach were that it was possible to delete underlying file without getting any warnings/restrictions about dependant views, tables etc.
+Athena also didn't provide indexing as it was just a querying tool with its own flavor PrestoDB SQL, it was lacking some Postgres methods and didn't allow recursive functions as well as true **_materialized views_**. It also didn't support ***CREATE TABLE LIKE*** or ***DELETE FROM*** or ***UPDATE***, but it allowed to give an access to query a table without a fear that the table would be dropped as behind a hood it was a file in s3.
+AWS Glue provided a mechanism for partitioning and indexing with the limitations: 
 - only partition column could be used as an index
 - only integer and strings could be used as an index
 
+## Rust Program:
 
-### Members
+#### _Members_
 
 Rust program workspace had the next members:
 ```rust
@@ -134,19 +116,20 @@ members = [
 
 Why this project structure?
 
-It was designed to allow for the separation of tasks and crates in Cargo.toml. This separation enabled us to build and manage each component independently, avoiding unnecessary complexity and loading all the crates in once, each . It also provided better visibility into the performance of individual areas, making it easier to track and optimize and fix each part of the system.
+It was designed to allow the separation of _tasks_ and _crates_ in _Cargo.toml_. This separation enabled us to build and manage each component independently, avoiding unnecessary complexity and loading all the crates in once. It also provided better visibility into the performance of individual areas, making it easier to track and optimize and fix each part of the system.
 
-### Schema
-#### Struct/Table Representation in Rust are in **_project_schemas_**
+#### _Schema_
 
-In order to read the tables and perform some calculations and also to ensure type safety  I had to map each Postgres table to a corresponding Rust struct. Initially, this mapping was done manually, but later I discovered the powerful _**diesel_ext**_ crate (later [_**diesel_cli_ext**_](https://crates.io/crates/diesel_cli_ext)), which allowed me to automatically map the schema from Postgres to Rust structs. I still had to create diesel _table!_ macro definition which was automated with the help of _bash_ script:
+Struct/Table Representation in Rust were in **_project_schemas_**:
 
+In order to read the tables and perform some calculations and also to ensure type safety  I had to map each Postgres table to a corresponding Rust struct. Initially, this mapping was done manually, but later I discovered the powerful _**diesel_ext**_ crate (later [_**diesel_cli_ext**_](https://crates.io/crates/diesel_cli_ext)), which allowed me to automatically map the schema from Postgres to Rust structs. I still had to create diesel _table!_ macro definition which was automated with the help of _bash_ script. 
+Running such a query:
 ```shell
 SELECT column_name, data_type, is_nullable
 FROM information_schema.columns
 WHERE table_name = 'orders';
 ```
-which was giving me 
+was producing the result:
 ```shell
  column_name |          data_type          | is_nullable 
 ---------------------------------+------------------------
@@ -157,17 +140,8 @@ which was giving me
  data        | jsonb                       | YES
  ...
 ```
-which together with this bash script would give diesel  [_table!_macro definition](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-table_macro-sh) definition.
+This table description together with this [bash script](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-table_macro-sh) would give diesel _table!_ definition.
 
-[//]: # (<div class="code-container">)
-
-[//]: # ()
-[//]: # (  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=table_macro.sh"></script>)
-
-[//]: # ()
-[//]: # (</div>)
-
-and the final definition would be:
 ```shell
 table! {
     orders (id) {
@@ -179,57 +153,46 @@ table! {
     }
 }
 ```
-The process of creating a struct was automated through a _**Makefile**_ command. Here's how it works:
+The process of creating a struct was automated through a _**Makefile**_ command. Here's how it worked:
 
 
-The **_create-model_** target in the _**Makefile**_ generates the necessary Rust files for each table. It begins by creating a _diesel.toml_ file for the table, which defines how the schema is printed.
+The **_create-model_** target in the _**Makefile**_ generated the necessary Rust files for each table. It began by creating a _diesel.toml_ file for the table, which defined how the schema was printed.
 
-The command then adds the module for the table to various locations in the project, including _**mod.rs**_ files for organizing the project’s code structure.
+The command then added the module for the table to the various locations in the project, including _**mod.rs**_ files for organizing the project’s code structure.
 
-Using the _**diesel**_ print-schema command, the schema for the specified table is fetched from the local Postgres database and saved to a Rust file.
+Using the _**diesel**_ _print-schema_ command, the schema for the specified table was fetched from the local Postgres database and saved to a Rust file.
 
-The _**diesel_ext**_ crate is then used to generate the Rust struct for that table, which is placed in the appropriate module.
+The _**diesel_ext**_ crate then was used to generate the Rust struct for that table, which was placed into the appropriate module.
 
 
-I created also a _**template_task**_ which was a blue-print for most tasks and used the _**sed**_ command to customize tasks files (using [_**template_task**_](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-template_task-rs) ), creating a corresponding task in the project.
-
-This streamlined the process significantly, allowing efficient table mapping and the integration of the database schema into Rust code with minimal manual intervention.
+I created also a _**template_task**_ which was a blue-print for most tasks and used the _sed_ command to customize tasks' files (using [_**template_task**_](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-template_task-rs) ), creating a corresponding task in the project.
 
 
 Here’s the [Makefile](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_model-rs)  command that does all of this.
 
-[//]: # (<div class="code-container">)
-
-[//]: # ()
-[//]: # (  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=create_model.rs"></script>)
-
-[//]: # ()
-[//]: # (</div>)
-
-This approach saved considerable time and reduced the chance of errors with types/nullables by automating the mapping process.
+This approach saved considerable time and streamlined the process, reduced the chance of errors with types/nullables by automating the mapping process.
 
 Now I would rather put everything into combined bash script which would run over the predefined list of tables and create _table!_ macro definition and a corresponding struct with a task, but the existing approach worked well for years and I won't change it, as its life is coming to the end due to change in the infrastructure.
 Here’s an example of some Postgres tables, corresponding structs and the task combining all of them with extra calculations:
 
 
-#### For instance, assume we had several postgres tables:
+For instance, assume we had several postgres tables:
 
-
-**Table 1: orders**
+_**Table 1: orders**_
 
 | id | user_id | amount | created_at | uuid                                   |
 |----|---------|--------|------------|----------------------------------------|
 | 1  | 101     | 200.5  | 2024-01-01 | "aaaaaaaa-1111-3333-5555-oooooooooooo" |
 | 2  | 102     | 450.0  | 2024-01-02 | "bbbbbbbb-2222-4444-6666-pppppppppppp" |
 
-**Table 2: users**
+_**Table 2: users**_
 
 | id  | name    | country | created_at | email              |
 |-----|---------|---------|------------|--------------------|
 | 101 | Alice   | USA     | 2023-01-01 | email1@example.com |
 | 102 | Bob     | Canada  | 2023-01-02 | email2@example.com |
 
-**Table 3: products**
+_**Table 3: products**_
 
 | id | name     | quantity | created_at | approved | price |
 |----|----------|----------|------------|----------|-------|
@@ -239,7 +202,7 @@ Here’s an example of some Postgres tables, corresponding structs and the task 
 
 To combine these tables and add calculated fields, the Rust program used the following [structs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-tables_structs-rs) which looked like this:
 ```rust
-// orders_tl.rs for Postgres diesel schema
+// project_schemas/tables/orders_tl.rs for Postgres diesel schema
 table! {
     orders (id) {
         id -> Int4,
@@ -250,7 +213,7 @@ table! {
     }
 }
 
-// order.rs for the struct
+// project_schemas/models/order.rs for the struct
 use uuid::Uuid;
 use bigdecimal::BigDecimal;
 use chrono::NaiveDateTime;
@@ -263,21 +226,55 @@ pub struct Order {
     pub uuid: Uuid,
 }
 ```
-[//]: # (<script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tables_structs.rs"></script>)
+where:
+
+`use uuid::Uuid;`  imports the Uuid type from the uuid crate
+
+`use bigdecimal::BigDecimal;` imports the BigDecimal type from the bigdecimal crate. BigDecimal is used to handle arbitrarily large or high-precision decimal numbers. It is commonly used in cases where floating-point precision is not enough.
+
+`use chrono::NaiveDateTime;` imports the NaiveDateTime type from the chrono crate. NaiveDateTime is used to represent date and time without timezone information.
+
+`#[derive(Queryable, Debug)]`
+
+`Queryable:` This is a procedural macro from **diesel**. It automatically generates the necessary code to allow the struct to be used for querying data from the database. It means the **_Order_** struct can be used in diesel queries to map results from the database into instances of the struct.
+
+`Debug:` This is another procedural macro, provided by Rust’s standard library. It automatically generates code to allow the struct to be printed in a human-readable form using `println!("{:?}", ...)`. It makes it easy to debug and print the struct in logs or console output.
 
 The table and struct definitions were organized within the _**project_schemas**_ directory. This directory included the tables and models subdirectories, each housing the respective definitions. Additionally, a **_mod.rs_** file was used to list and manage all the tables and models for easier access and modularity.
 
 ```shell
 project_schemas
-├── tables
-└── models
+└── src
+   ├── tables
+   ├── models
+   └── lib.rs
+└── Cargo.toml
 ```
 
-### Tasks
+[//]: # (<div class="mermaid">)
 
-Then we had to combine all the data, add some calculations, write the result into parquet file and upload to S3 into the designated busket/folder.
+[//]: # (graph TD)
 
-First we need to bring modules and structs into the scope of our `combined_orders.rs` task.
+[//]: # (A[project_schemas])
+
+[//]: # (A --> B[src])
+
+[//]: # (B --> C[tables])
+
+[//]: # (B --> D[models])
+
+[//]: # (B --> E[lib.rs])
+
+[//]: # (A --> F[Cargo.toml])
+
+[//]: # (</div>)
+
+
+#### _Tasks_
+
+Then we had to combine all the data, add some calculations, write the result into parquet file and upload it to S3 into the designated busket/folder.
+
+First we needed to bring modules and structs into the scope of our **_combined_orders.rs_** task.
 
 ```rust
 use super::prelude::*;
@@ -291,39 +288,28 @@ use project_schemas::tables::{
 
 What `use super::prelude::*;` does:
 
-This imports all public items from the prelude module defined in the parent module (super).
-The `*` wildcard includes everything that is publicly available within the `prelude` module.
+It imports all public items from the _**prelude**_ module defined in the parent module (super).
+The `*` wildcard includes everything that is publicly available within the **_prelude_** module.
 
-This is a common Rust pattern used to create a `prelude` module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.
-Example:
+This is a common Rust pattern to create a _**prelude**_ module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.
 
-In the prelude module, there are imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`,  `combined_orders.rs` file can directly use these items without specifying them individually.
+For example:
+
+In the prelude module, there are imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`,  **_combined_orders.rs_** task can directly use these items without specifying them individually.
 
 The full [prelude](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-task_mod-rs) code.
 
-[//]: # ()
-[//]: # (<div class="code-container">)
-
-[//]: # ()
-[//]: # (  <script src="https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c.js?file=tasks_mod.rs"></script>)
-
-[//]: # ()
-[//]: # (</div>)
-
-which means I can use all public items from this module.
-Where
+Which means I can use all public items from this module.
 The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name.
-My idea was to use it for generating a file name on the fly for writing it down as a parquet file (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function at runtime.
+My idea was to use it for generating a file name on the fly in order to provide a file name for writing it down as a parquet file (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function and store it as file name at runtime.
 
 In theory, what it does:
 
-`function_name` Crate
-The `function_name` crate provides a procedural macro to retrieve the name of the current function at runtime in Rust. It is often used for logging, debugging, or tracing purposes.
+`function_name` crate provides a procedural macro to retrieve the name of the current function at compile-time in Rust. It is often used for logging, debugging, or tracing purposes.
 
-`named Macro`
-The named macro is a part of the `function_name` crate. It allows to annotate a function so that I can programmatically access its name as a string.
+`named` macro is a part of the `function_name` crate. It allows to annotate a function so I can programmatically access its name as a string.
 
-When I apply `#[named]` to a function, it makes the name of the function accessible via a special constant or variable, usually _function_name_.
+When I apply `#[named]` to a function, it makes the name of the function accessible via a special variable _function_name_.
 I can then log or use the function's name directly.
 
 ```rust
@@ -338,7 +324,10 @@ fn main() {
     example_function();
 }
 ```
-The prelude model is inside `mod.rs` file which is in
+and it would print
+`Function name: example_function`
+
+The _**prelude**_ model was inside `mod.rs` file which was in
 
 ```shell
 project_tasks
@@ -350,17 +339,17 @@ project_tasks
         
 └── Cargo.toml
 ```
-In `mod.rs`:
+In `mod.rs` I had all tasks listed in such a manner:
 ```rust
 mod combined_orders; 
 pub use self::combined_orders::*;
 ```
-What it does:
+What it did:
 
 `pub use self::combined_orders::*;` re-exports all public items from the **_combined_orders_** module, making them available to other parts of the project that import this parent module.
 This pattern is often used in a module hierarchy to provide a clean interface to submodules by selectively exposing their contents.
 
-then in the task `combined_orders.rs`:
+then in the task **_combined_orders.rs_**:
 ```rust
 use std::collections::HashMap;
 ```
@@ -369,11 +358,12 @@ Which imports the HashMap type from the Rust standard library (**_std::collectio
 ```rust
 use project_schemas::tables::{ ... };
 ```
-This line imports specific modules from `project_schemas::tables` module, and it includes additional scoping and aliasing functionality.
+This line imports specific modules from **_project_schemas::tables_** module, and it includes additional scoping and aliasing functionality.
 
 What Happens Here:
-`orders::dsl as orders_dsl`: Imports the dsl module from `project_schemas::tables::orders` and renames it as **_orders_dsl_**. I can now use it as `orders_dsl` throughout the file.
-`dsl` stands for `domain-specific language`, which is a set of helper types, methods, or macros to construct SQL queries using the **Diesel** ORM library for working with tables and columns in our postgres database.
+
+`orders::dsl as orders_dsl` imports the dsl module from **_project_schemas::tables::orders_** and renames it as **_orders_dsl_**. I can now use it as **_orders_dsl_** throughout the file.
+**_dsl_** stands for **_domain-specific language_**, which is a set of helper types, methods, or macros to construct _SQL_ queries using the **Diesel** ORM library for working with tables and columns in our postgres database.
 
 Defining the struct for the output file:
 ```rust
@@ -391,9 +381,9 @@ struct CombinedOrderRecord {
     created_at: Option<NaiveDateTime>,
 }
 ```
-Here `#[derive(ParquetRecordWriter)]` that tells the Rust compiler to automatically implement the trait `ParquetRecordWriter` for the struct `CombinedOrderRecord`. 
+Here `#[derive(ParquetRecordWriter)]` tells the Rust compiler to automatically implement the trait `ParquetRecordWriter` for the struct `CombinedOrderRecord`. 
 
-The `ParquetRecordWriter` trait is a part of an external library `parquet_derive` which implements ``#[proc_macro_derive(ParquetRecordWriter)]`  which defines a procedural macro that will be triggered by the #[derive(ParquetRecordWriter)] attribute applied to a struct or enum.
+The `ParquetRecordWriter` trait is a part of an external library `parquet_derive` which implements `#[proc_macro_derive(ParquetRecordWriter)]`  which defines a procedural macro that will be triggered by the `#[derive(ParquetRecordWriter)]` attribute applied to a struct or enum.
 It will handle the input, fields/types and write the struct to a file in Parquet's binary format.
 
 Then there is the task itself, `pub` which means it can be called outside the module,
@@ -409,26 +399,26 @@ pub fn combined_orders(pg_uri: &str) -> (String, i64) {
 ```
 Here:
 
-[//]: # (_Order_, _User_, _Product_, _Currency_ and  _Tax_ represent the tables fetched from Postgres.)
 ```shell
 let products = products_dsl::products.load::<Product>(&conn).unwrap();
 ```
-is part of a query using _Diesel_, an _ORM (Object-Relational Mapper)_ library for interacting with databases in Rust, which allows to interact with a relational database using the programming language's objects (e.g. structs) instead of writing raw SQL queries. Diesel ensures structs match database schema with implementing trait *_Queryable_* for the struct. It generates the necessary code to convert a row from a database table into an instance of the struct. The struct fields must match the columns in the database table (in name and type)
-This line brings into scope the _DSLs (Domain-Specific Languages)_ for interacting with tables in the database. Diesel uses DSLs to generate SQL queries and map the results to Rust types. The _products::dsl, orders::dsl_ etc refer to the corresponding tables, and I'm giving them aliases (_orders_dsl, users_dsl_, ...) for convenience and loading, filtering using DSL methods.
+This line brings into scope the _DSLs (Domain-Specific Languages)_ for interacting with tables in the database, which allows to interact with a relational database using the programming language's objects (e.g. structs) instead of writing raw SQL queries. Diesel ensures structs match database schema with implementing trait _**Queryable**_ for the struct. It generates the necessary code to convert a row from a database table into an instance of the struct. The struct fields must match the columns in the database table (in name and type).
 
-**_products_dsl::products**_
+Diesel uses DSLs to generate SQL queries and map the results to Rust types. The _products::dsl, orders::dsl_ etc refer to the corresponding tables, and I'm giving them aliases (_orders_dsl, users_dsl_, ...) for convenience and loading, filtering using DSL methods.
 
-_products_dsl_ is the alias created for _products::dsl_. _Diesel_ automatically generates a _products_ variable (referring to the _products_ table in the database) within this DSL module, which represents the table in the database.
+`products_dsl::products**`
+
+`products_dsl` is the alias created for `products::dsl`. _Diesel_ automatically generates a _products_ variable (referring to the _products_ table in the database) within this DSL module, which represents the table in the database.
 
 ``.load::<Product>()`` is a Diesel method used to execute the query and load the results into a collection of Rust structs `Vec<Product>`.
 
-_Product_ is a _Rust_ struct representing the schema of the _products_ table (i.e., it maps the columns of the _products_ table to fields in the _Product_ struct).
+`Product` is a Rust struct representing the schema of the _**products**_ table (i.e., it maps the columns of the _**products**_ table to fields in the _**Product**_ struct).
 
-_&conn_ is a reference to a database connection, which is used to execute the query against the database. This connection is established using Diesel’s connection API ( _PgConnection_ for PostgreSQL).
+`&conn` is a reference to a database connection, which is used to execute the query against the database. This connection is established using Diesel’s connection API ( _PgConnection_ for PostgreSQL).
 
-_.unwrap()_ is used to unwrap the _Result_ returned by ``load::<Product>()``. This method will either return the query results (if successful) or panic if there was an error.
+`.unwrap()` is used to unwrap the _Result_ returned by ``load::<Product>()``. This method will either return the query results (if successful) or panic if there was an error.
 Usually it is discouraged to use `unwrap` in production code unless I am certain that the query will succeed, as it causes the program to panic on an error.
-We were using `unwrap` as wanted the program to panic and stop running, which will give us a clear sign that the data was not updated.
+We were using `unwrap` as wanted the program to panic and stop running, which would give us a clear sign that the data was not updated.
 If I implemented it now I would rather use `expect` with the custom message but keep the panicking behaviour.
 ```shell
 let products = products_dsl::products
@@ -457,10 +447,10 @@ let products = products_dsl::products
 ```
 as here I will get an empty `Vec<Product>` into my data.
 
-Usually the `panic!()` was caused by changes in the underlying Postgres tables, like removed column, unexpected type etc. I couldn't dynamically construct a struct in Rust with Diesel - so if I had a column in my _table!_ macro definition and a struct but `.load::<Product>` didn't find it - it will result in panic.
+Usually the `panic!()` was caused by changes in the underlying Postgres tables, like removed column, unexpected type etc. I couldn't dynamically construct a struct in Rust with Diesel - so if I had a column in my _table!_ macro definition and a struct but if `.load::<Product>` didn't find it - it resulted in panic.
 In that case running the task which was loading this table further didn't make sense hence `panic!()` behaviour was justified.
 
-There is also an operator **_?_** which operator propagates errors if any occur during the creation of the file writer avoiding unexpected panic. 
+There is also an operator **_?_**  which propagates errors if any occur during the creation of the file avoiding unexpected panic. 
 Requires `Result/Option` return:
 - If the operation returns _**Ok(value)**_, it extracts the value and continues execution.
 - If the operation returns **_Err(error)_**, it propagates the error to the calling function.
@@ -473,9 +463,9 @@ I wanted to see how long it takes to load some tables, for that I had
     let users = users_dsl::users.load::<User>(&conn).unwrap();
     trace!("load users took: {:?}", users_load.elapsed());
 ```
-where _**Instant::now()**_ creates a new Instant that represents the current time, essentially starting a stopwatch.
-_**trace!**_ lane logs the time taken to execute the query and to load the table users from the database. It uses the _trace!_ macro, which is typically used for logging at a very detailed level. The _**elapsed()** duration is formatted and printed to show how long the query took to execute.
-The _**elapsed()**_ method in Rust returns a _**Duration**_ object, which represents the amount of time that has passed since the _Instant_ was created. The unit of time in _**Duration**_ is typically in nanoseconds (ns).
+where `Instant::now()` creates a new Instant that represents the current time, essentially starting a stopwatch.
+`trace!` lane logs the time taken to execute the query and to load the table users from the database. It uses the `trace!` macro, which is typically used for logging at a very detailed level. The `elapsed()` duration is formatted and printed to show how long the query took to execute.
+The `elapsed()` method in Rust returns a `Duration` object, which represents the amount of time that has passed since the `Instant` was created. The unit of time in `Duration` is nanoseconds (ns).
 This information could be useful for monitoring and optimization.
 The duration could be converted to different units as 
 ```rust
@@ -484,20 +474,20 @@ println!("Elapsed time in seconds: {:?}", users_load.as_secs());
 println!("Elapsed time in microseconds: {:?}", users_load.as_micros());
 ```
 
-I want to collect all **_users_** ids and also all **_orders_** ids from the **_users_** table
+In order to collect all **_users_** ids and also all **_orders_** ids from the **_users_** table:
 ```rust
 let users_ids: Vec<i32> = users.iter().map(|x| x.id).collect();
 trace!("{:?}", users_ids.len());
 let order_ids: Vec<i32> = users.iter().filter_map(|x| x.order_id).collect();
 ```
-`users.iter()` creates an iterator over the users vector, producing references to each _User_ object, without consuming the collection.
-It returns an iterator of type `std::slice::Iter<'_, T>`, in this case `users` is `Vec<User>`, so T = User.
+`users.iter()` creates an iterator over the **users** vector, producing references to each **User** object, without consuming the collection.
+It returns an iterator of type `std::slice::Iter<'_, T>`, in this case `users` is `Vec<User>`, so **T = User**.
 
-`.map(|x| x.id)` takes every users record, extract value from the field `id` and collects them into a vector if integers `Vec<i32>`.
+`.map(|x| x.id)` takes every **users** record, extract value from the field `id` and collects them into a vector if integers `Vec<i32>`.
 
-`.filter_map(|x| x.order_id).collect()` creates a vector (_order_ids_) that contains the _order_id_ field of each _user_ from the _users_ vector, but only if _order_id_ is _Some(i32)_. The _filter_map_ function filters out _None_ values and collects only _Some(i32)_ values into the vector. This results in a list of _order_ids_ from users.
+`.filter_map(|x| x.order_id).collect()` creates a vector (**order_ids**) that contains the **order_id** field of each **user** from the **users** vector, but only if **order_id** is `Some(i32)`. The `filter_map` function filters out **None** values and collects only `Some(i32)` values into the vector. This results in a list of **order_ids** from **users**.
 
-I want to get _currency_, corresponding with the _product_id_ so for that I load _currencies_ table, filtering it by two fields: `type` and `type_id`
+I want to get **currency**, corresponding with the **product_id** so for that I load **currencies** table, filtering it by two fields: `type` and `type_id`
 ```rust
 let currencies: Vec<Currency> = currencies_dsl::currencies
         .filter(currencies_dsl::type.eq("Product"))
@@ -506,11 +496,11 @@ let currencies: Vec<Currency> = currencies_dsl::currencies
         .unwrap();
 ```
 `.filter(currencies_dsl::type.eq("Order"))`
-Filters the _currencies_ table to only include rows where the type column is equal to "Order".
+Filters the **currencies** table to only include rows where the type column is equal to "Order".
 `.filter(currencies_dsl::type_id.eq(any(&order_ids[..])))`
-Filters the _currencies_ table to only include rows where the _type_id_ column matches one of the _order_ids_ collected from the users table.
+Filters the **currencies** table to only include rows where the **type_id** column matches one of the **order_ids** collected from the **users** table.
 
-Now I want to have a _HashMap_ where keys are `order_id` and the values are references to the corresponding _Currency_ objects.
+Now I want to have a **HashMap** where keys are `order_id` and the values are references to the corresponding **Currency** objects.
 
 ```rust
 let currencies_by_order_id: HashMap<i32, &Currency> = currencies
@@ -520,25 +510,25 @@ let currencies_by_order_id: HashMap<i32, &Currency> = currencies
 ```
 `currencies.iter()`
 
-Creates an iterator over the currencies vector, producing references to each _Currency_ object.
+Creates an iterator over the currencies vector, producing references to each **Currency** object.
 
 `map(|x| (x.type_id.unwrap(), x))`
 
-For each _Currency_ object _x_:
-`x.type_id.unwrap()` retrieves the `type_id` value from the `Option<i32>`. This assumes that all `type_id` values are _Some_ and will panic if any _type_id_ is _None_.
-The closure returns a tuple _(type_id, x)_, where _type_id_ becomes the key and x (a reference to the _Currency_ object) becomes the value.
+For each **Currency** object **x**:
+`x.type_id.unwrap()` retrieves the `type_id` value from the `Option<i32>`. This assumes that all `type_id` values are `Some` and will panic if any `type_id` is **None**.
+The closure returns a tuple **(type_id, x)**, where `type_id` becomes the key and **x** (a reference to the **Currency** object) becomes the value.
 
 `collect()`
 
-Converts the iterator of _(key, value)_ pairs into a HashMap.
+Converts the iterator of **(key, value)** pairs into a **HashMap**.
 
 `HashMap<i32, &Currency>`
 
-The resulting _HashMap_ has:
-Keys of type _i32_, representing the unwrapped _type_id_ values.
-Values of type _&Currency_, which are references to the _Currency_ objects.
+The resulting **HashMap** has:
+Keys of type `i32`, representing the unwrapped `type_id` values.
+Values of type **&Currency**, which are references to the **Currency** objects.
 
-Which creates kind of a lookup table, when I can pass a key (type_id = order_id in this case) and get a corresponding _Currency_ object with all the fields.
+Which creates kind of a lookup table, when I can pass a key (type_id = order_id in this case) and get a corresponding **Currency** object with all the fields.
 
 ```rust
     let mut count = 0;
@@ -546,8 +536,7 @@ Which creates kind of a lookup table, when I can pass a key (type_id = order_id 
     let path_meta = <&str>::clone(&path);
 ```
 Before starting the collection of all the data I define the path/name of the future parquet file I'm going to write data into.
-`let path_meta = <&str>::clone(&path);` is needed as I wanted to extract metadata of the file, and for that I needed to clone `path` value and pass it further as the reference (why can't I just use a reference - check the logic).
-_CombinedOrder_ combines fields from both tables and includes a derived field _amount_usd_ using the information from currencies table and _amount_with_tax_ using the information from taxes table.
+**CombinedOrder** combines fields from both tables and includes a derived field **amount_usd** using the information from currencies table and **amount_with_tax** using the information from **taxes** table.
 
 ```rust
     let parquet_records: Vec<CombinedOrderRecord> = orders
@@ -556,10 +545,10 @@ _CombinedOrder_ combines fields from both tables and includes a derived field _a
         .filter(|order| order.active)
         .map(|o| {
 ```
-`orders.iter().filter(|order| order.user_id.is_some())` filters out orders where the _user_id_ is _None_. This ensures only orders associated with a user are processed further.
+`orders.iter().filter(|order| order.user_id.is_some())` filters out orders where the `user_id` is **None**. This ensures only orders associated with a user are processed further.
 
-The `.map(|o| { ... })` transforms each filtered order (o) into a new representation, producing a `CombinedOrderRecord`.
-`let currency = currencies_by_order_id_id.get(&o.id)` retrieves the currency information for the current order from the `currencies_by_order_id_id` `HashMap` mapping described above, using the order's id as a key. If no entry exists, currency is None.
+The `.map(|o| { ... })` transforms each filtered `order (o)` into a new representation, producing a `CombinedOrderRecord`.
+`let currency = currencies_by_order_id_id.get(&o.id)` retrieves the currency information for the current order from the `currencies_by_order_id_id` `HashMap` mapping described above, using the order's `id` as a key. If no entry exists, currency is **None**.
 ```rust
 let conversion_rate = currency
     .map(|x| {
@@ -572,20 +561,19 @@ let conversion_rate = currency
 ```
 extracts the conversion rate from the currency (if it exists). 
 The logic:
-`currency.map(|x| ...)` operates on the optional currency object.
+`currency.map(|x| ...)` operates on the optional **currency** object.
 If a currency exists, its `conversion_rate` is cloned and converted to a **_f64_**. 
 If this fails, an `expect` statement ensures a panic with an error message.
 If no currency exists (`currency.is_none()`), a default conversion rate of `1.0` is used via `.unwrap_or(1.0)`.
 
-why to I need to use `clone()` for _conversion_rate_:
-It's due to Rust ownership rules:
-_x.conversion_rate_ is an _Option<BigDecimal>_, calling _.clone()_ creates a copy of the _BigDecimal_ value.
+why do I need to use `clone()` for `conversion_rate`: it's due to Rust ownership rules:
+`x.conversion_rate` is an `Option<BigDecimal>`, calling `.clone()` creates a copy of the `BigDecimal` value.
 
-This is necessary because BigDecimal does not implement the _Copy_ trait as _BigDecimal_ is a complex type.
-Without _.clone()_, calling _x.conversion_rate.map(...)_ would move the value out of _x.conversion_rate_.
+This is necessary because `BigDecimal` does not implement the `Copy` trait as **BigDecimal** is a complex type.
+Without `.clone()`, calling `x.conversion_rate.map(...)` would move the value out of `x.conversion_rate`.
 
-If _x.conversion_rate_ is used later in the code, this would cause a compile-time error because the value has been moved.
-Bigdecimal is a complex value as it represents arbitrary-precision decimal numbers.
+If `x.conversion_rate` is used later in the code, this would cause a compile-time error because the value has been moved.
+`Bigdecimal` is a complex value as it represents arbitrary-precision decimal numbers.
 In order to avoid cloning now I'd better do
 ```rust
 let conversion_rate = currency
@@ -598,7 +586,7 @@ let conversion_rate = currency
     })
     .unwrap_or(1.0);
 ```
-where _as_ref()_ converts _Option<T> to Option<&T>_, allowing borrowing the value instead of moving or cloning it.
+where `as_ref()` converts `Option<T> to Option<&T>`, allowing borrowing the value instead of moving or cloning it.
 or 
 ```rust
 let conversion_rate = currency
@@ -606,16 +594,16 @@ let conversion_rate = currency
     .map(|cr| cr.to_f64().expect("bigdecimal to f64"))
     .unwrap_or(1.0);
 ```
-_and_then_ avoids intermediate map calls and also flattens the nested Option structure.
+`and_then` avoids intermediate map calls and also flattens the nested `Option` structure.
 
 `let currency_name = ...` uses the same logic:
-If no currency exists, the fallback is `.unwrap_or_else(|| "USD".to_string())`.
-The same logic is for extracting _user_email_ and _country_ from the User object.
+If no **currency** exists, the fallback is `.unwrap_or_else(|| "USD".to_string())`.
+The same logic is for extracting `user_email` and `country` from the **User** object.
 
-With similar logic I extract _Tax_ object based on the corresponding `order_id` and getting a `tax_rate` via `let tax_rate = taxes.map(|x| x.rate.to_f64().expect("tax rate bigdecimal to f64"));` with a descriptive error message - In case the conversion to _f64_ failed I know which field is responsible for that.
+With similar logic I extract **Tax** object based on the corresponding `order_id` and getting a `tax_rate` via `let tax_rate = taxes.map(|x| x.rate.to_f64().expect("tax rate bigdecimal to f64"));` with a descriptive error message - In case the conversion to `f64` failed I know which field is responsible for that.
 
 
-_CombinedOrder_ combines fields from both tables and includes a derived field _amount_with_tax_.
+**CombinedOrder** combines fields from both tables and includes a derived field **amount_with_tax**.
 `o.amount * (1.0 + tax_rate),`
 
 After all the fields are calculated, they are collected into the `Vec<CombinedOrderRecord>` via
@@ -623,18 +611,16 @@ After all the fields are calculated, they are collected into the `Vec<CombinedOr
 The `.collect()` method collects all the `CombinedOrderRecord` instances into a new collection. The collection type depends on the type specified earlier in:
 `let parquet_records: Vec<CombinedOrderRecord> = ...`
 
-When I write the data into struct, in some cases it's `order_id: o.order_id,` in some `u.country.clone()`, why not clone all the time? Because `order_id` here is `i32` which implements `Copy` trait and `country` which is String - doesn't.
+When I write the fields into struct, in some cases it's `order_id: o.order_id,` in some `u.country.clone()`, why not clone all the time? Because `order_id` here is `i32` which implements `Copy` trait and `country` which is `String` - doesn't.
 
 After this collection I need to write the file into parquet format and upload to S3. 
-How to do it?
-Now we have:
+What do we need to do for that?
 
-1.  Define the Path & get parquet_records of type **_CombinedOrderRecord_**
+1.  Define the **Path** & get **parquet_records** of type **CombinedOrderRecord**
 
     ```rust
     let path = "/tmp/combined_orders.parquet";
-    let path_meta = <&str>::clone(&path); 
-    let mut count = 0;
+    let mut count = 0; // to count the number of row groups
 
     let parquet_records: Vec<CombinedOrderRecord> = orders
     ...
@@ -643,31 +629,35 @@ Now we have:
 2.  Get the Schema
 
     ```rust
-    let vector_for_schema = &parquet_records;
-    let schema = vector_for_schema.as_slice().schema().unwrap();
+    let schema = parquet_records.as_slice().schema().unwrap();
     println!("{:?} schema", &schema);
     ```
 
-    Here:
-    `vector_for_schema` is now a reference to the vector `parquet_records`, meaning I can use it without moving ownership.
-    
-    `as_slice()` converts the vector reference into a slice (&[T]), allowing slice-based operations.
+    Here: 
+    `as_slice()` converts the vector `parquet_records` into a slice (&[T]), allowing slice-based operations. The _**as_slice**_ method (or the **_&v[..]_** syntax) is used to create a slice from a vector. A slice is a reference to a contiguous sequence of elements in a collection. Using `as_slice` allows me to pass a vector as a slice without transferring ownership. If I need to use a subset of vector's elements, I'd use `&v[1..4]`. Also `ParquetRecordWriter` is designed to work with a slice, and if I try to do 
+```rust
+let schema = &parquet_records.schema().unwrap();
+```
+I'll get `Method schema not found in the current scope for type Vec<FeatureSet>`
+
     `.schema()` is a method provided by a trait **_ParquetRecordWriter_**, which extracts the Parquet schema from the data structure (`schema()` returns `Result<parquet::schema::types::TypePtr, parquet::errors::ParquetError>`).
     `.unwrap()` is used to handle the Result type returned by `.schema()`, which will panic if the operation fails. If the schema extraction is successful, it returns the schema object.
 
 3.  Open File for Writing
+    Here I'm borrowing **path** variable, as I need to use it later for the reader.
 
     ```rust
-    let file = std::fs::File::create(path).unwrap();
+    let file = std::fs::File::create(&path).unwrap();
     let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
     ```
 
-    `std::fs::File::create(path):`
+    `std::fs::File::create(&path):`
     Opens the specified file for writing or creates the file if it doesn't already exist and panics on failure.
     
     `SerializedFileWriter::new(file, schema, props())`:
     Initializes a Parquet file writer.
     Takes the file, schema, and writer properties (props()) as inputs.
+
     `props()`: Refers to writer properties. Initially we had to define them in each task as `let props = Arc::new(WriterProperties::builder().build());` but now it's getting pulled from `project_parquet` as
     
     ```rust
@@ -723,7 +713,7 @@ Now we have:
 6. Read Metadata from the File for prometheus metrics
     
     ```rust
-    let reader = SerializedFileReader::try_from(path_meta).unwrap();
+    let reader = SerializedFileReader::try_from(path).unwrap();
     let parquet_metadata = reader.metadata();
     let file_metadata = parquet_metadata.file_metadata();
     let rows_number = file_metadata.num_rows();
@@ -731,14 +721,15 @@ Now we have:
     ```
 
     **_SerializedFileReader::try_from(path_meta):_**
-    Opens the written Parquet file for reading.
+    Opens the written Parquet file for reading. Here, path is borrowed, this is because the method **_try_from_** doesn't take ownership of **_path_** variable, it takes a reference (_&path_), and so no ownership transfer occurs. The ownership of _path_ remains with the original variable.
     Reads the file metadata for verification or further processing.
     **_file_metadata.num_rows():_**
     Retrieves the number of rows written to the file.
     **_(path.into(), rows_number):_**
-    Returns the file path and the number of rows as the output of the task.
+    Returns the file _path_ and the number of rows as the output of the task.
+    The **_into()_** method consumes _path_ and attempts to convert it into the type specified in the tuple (_String_ for this function).
 
-### Streaming Tasks
+#### _Streaming Tasks_
 
 Because our program started from reading small-normal size tables we started using **_Diesel_**, but then we got hit by program getting OOM or getting into the conflict with RDS instance due to loading the huge volume of data at once from the big tables.
 To handle that some tasks were recreated using **_sqlx_** crate, which was used for asynchronously reading large tables from a PostgreSQL, processing the data, and writing it to a Parquet file format.
@@ -983,7 +974,7 @@ impl ProjectStreamingTask for RequestStreamingTask {
 }
 ```
 
-### Parquet Writer
+#### _Parquet Writer_
 
 In order to be able to write files into parquet I'm using the crates `parquet` and `parquet_derive` as well as extra methods from `project_parquet` defined by us:
 
