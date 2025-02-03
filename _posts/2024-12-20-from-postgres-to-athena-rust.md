@@ -58,7 +58,9 @@ Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) pro
 # The Solution:
 
 ## ETL:
-{% mermaid %}
+
+[//]: # ({% mermaid %})
+<div class="mermaid">
 graph TD;
 RustProgram[Rust Program] -->|Reads| PostgresRDS[PostgreSQL RDS];
 RustProgram -->|Calculates & Aggregates| S3ParquetFiles[S3 Parquet Files];
@@ -69,8 +71,9 @@ AWSAthena -->|Used in| Reports[Reports];
     %% Adding styles for clarity
     classDef process fill:#f9f,stroke:#333,stroke-width:2px;
     class RustProgram,PostgresRDS,S3ParquetFiles,AWS_GLUE,AWSAthena,Reports process;
-{% endmermaid %}
+</div>
 
+[//]: # ({% endmermaid %})
 
 
 Instead of performing everything within Postgres, we built an ETL pipeline with Rust, AWS S3, GLue and Athena.
