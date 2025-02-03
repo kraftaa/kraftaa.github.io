@@ -30,6 +30,7 @@ plugins:
   - jekyll-sitemap
   - jekyll-paginate
   - jemoji
+  - jekyll-local-diagram
 #  - jekyll-mermaid
 
 #mermaid:
