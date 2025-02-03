@@ -57,10 +57,7 @@ Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) pro
 
 # The Solution:
 
-<script type="module">
-  import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
-  mermaid.initialize({ startOnLoad: true });
-</script>
+## ETL:
 
 <div class="mermaid">
 flowchart TD;
@@ -74,50 +71,6 @@ AWSAthena -->|Used in| Reports[Reports];
     classDef process fill:#f9f,stroke:#333,stroke-width:2px;
     class RustProgram,PostgresRDS,S3ParquetFiles,AWS_GLUE,AWSAthena,Reports process;
 </div>
-
-## ETL:
-
-[//]: # (```mermaid)
-
-[//]: # (graph TD;)
-
-[//]: # (    A-->B;)
-
-[//]: # (    A-->C;)
-
-[//]: # (    B-->D;)
-
-[//]: # (    C-->D;)
-
-[//]: # (```  )
-
-    
-[//]: # ({% mermaid %})
-
-[//]: # ([//]: # &#40;<div class="mermaid">&#41;)
-[//]: # (flowchart TD;)
-
-[//]: # (RustProgram[Rust Program] -->|Reads| PostgresRDS[PostgreSQL RDS];)
-
-[//]: # (RustProgram -->|Calculates & Aggregates| S3ParquetFiles[S3 Parquet Files];)
-
-[//]: # (AWS_GLUE[AWS Glue Crawler]-->|Crawls & Creates Schema| S3ParquetFiles[S3 Parquet Files];)
-
-[//]: # (S3ParquetFiles[S3 Parquet Files] -->|Tables via Glue Schema| AWSAthena[AWS Athena];)
-
-[//]: # (AWSAthena -->|Used in| Reports[Reports];)
-
-[//]: # ()
-[//]: # (    %% Adding styles for clarity)
-
-[//]: # (    classDef process fill:#f9f,stroke:#333,stroke-width:2px;)
-
-[//]: # (    class RustProgram,PostgresRDS,S3ParquetFiles,AWS_GLUE,AWSAthena,Reports process;)
-
-[//]: # ()
-[//]: # ([//]: # &#40;</div>&#41;)
-[//]: # ()
-[//]: # ({% endmermaid %})
 
 
 Instead of performing everything within Postgres, we built an ETL pipeline with Rust, AWS S3, GLue and Athena.
