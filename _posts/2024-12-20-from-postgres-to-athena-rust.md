@@ -11,7 +11,7 @@ _Work in progress_
 ## Table of Contents
 - [Problem](#problem)
 - [The Solution](#the-solution)
-    - [Mermaid ETL](#mermaid-etl-chart)
+    - [ETL](#etl)
     - [Rust Program](#rust-program)
       - [Members](#members)
       - [Schema](#schema)
@@ -55,11 +55,9 @@ Incorporating derived fields and merging data from multiple tables resulted in o
 Scaling the Postgres instance to handle heavy ETL (Extract, Transform, Load) processes was considered expensive at that time.
 
 
-# The Solution: 
-ETL with Rust + Parquet + S3 + Glue + Athena
+# The Solution:
 
-## Mermaid ETL chart
-
+## ETL:
 {% mermaid %}
 graph TD;
 RustProgram[Rust Program] -->|Reads| PostgresRDS[PostgreSQL RDS];
