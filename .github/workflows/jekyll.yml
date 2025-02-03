@@ -30,7 +30,7 @@ jobs:
           bundle install
         working-directory: ${{ github.workspace }}
 
-      - name: Debug: Check _site contents
+      - name: Check _site contents
         run: |
           echo "Checking if _site exists..."
           if [ -d "_site" ]; then
