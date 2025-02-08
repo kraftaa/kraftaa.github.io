@@ -18,8 +18,14 @@ _Work in progress_
       - [Tasks](#tasks)
       - [Streaming Tasks](#streaming-tasks)
       - [Parquet Writer](#parquet-writer)
+    - [AWS](#aws)
+      -  [Uploading to S3](#uploading-to-s3)
+      -  [Crawler](#crawler)
+    - [Executing the program](#executing-the-program)
+- [Summary](#summary)
 
-# Problem:
+
+## Problem:
 
 This project began several years ago as a solution for providing data for company reporting in the absence of an established ETL process. The production data resided in a Postgres RDS database, but generating reports directly from 
 the primary instance was not considered as an option. Doing so would have imposed additional load on the main application and required additional roles to handle live production data.
@@ -44,9 +50,9 @@ Incorporating derived fields and merging data from multiple tables resulted in o
 Scaling the Postgres instance to handle heavy _ETL (Extract, Transform, Load)_ processes was considered expensive at that time.
 
 
-# The Solution:
+## The Solution:
 
-## ETL:
+#### ETL:
 
 <div class="mermaid">
 flowchart TD;
@@ -73,9 +79,9 @@ This **_Rust_** project was originally initiated by my colleague and Rust wizard
 **_Rust program:_**
 
 The program fetched data from Postgres, performed transformations (including derived fields and joins across tables), and saved the output in Parquet format.
-UsingRust allowed us to optimize performance and maintain type safety by representing tables as Rust _structs_.
+Using Rust allowed us to optimize performance and maintain type safety by representing tables as Rust _structs_.
 
-Rust's type-checking served as a safeguard for ensuring the integrity of production data. If the production system encountered any invalid values or _NaN_, the Rust process would immediately detect the issue and send an error notification, helping to maintain data accuracy and reliability.
+Rust type-checking served as a safeguard for ensuring the integrity of production data. If the production system encountered any invalid values or _NaN_, the Rust process would immediately detect the issue and send an error notification, helping to maintain data accuracy and reliability.
 The Rust program was deployed in a Kubernetes environment using a Helm chart. The chart configured a service account with the appropriate role-based access to AWS services, including S3 and Glue. Additionally, the Helm chart utilized a Kubernetes secret to securely manage the connection credentials for the RDS instance.
 
 **_Parquet Files on S3:_**
@@ -86,17 +92,18 @@ Transformed data was stored in an S3 bucket in a columnar Parquet format. This r
 
 AWS Glue was used to crawl the Parquet files on S3 and create metadata.
 
-Athena provided a cost-efficient way to query the data using SQL. Bear in mind that Athena doesn't create real tables or materialized views, it only creates a metadata and reads everything from the file, stored in S3.
-The reports leveraged Athena tables and views as the foundation for data visualization.
+Athena provided a cost-efficient way to query the data using SQL. Bear in mind that Athena doesn't create real tables or materialized views, it only creates a metadata and reads everything from the files, stored in S3.
+The reports used Athena tables and views as the foundation for data visualization.
 The cons of such approach were that it was possible to delete underlying file without getting any warnings/restrictions about dependant views, tables etc.
 Athena also didn't provide indexing as it was just a querying tool with its own flavor PrestoDB SQL, it was lacking some Postgres methods and didn't allow recursive functions as well as true **_materialized views_**. It also didn't support ***CREATE TABLE LIKE*** or ***DELETE FROM*** or ***UPDATE***, but it allowed to give an access to query a table without a fear that the table would be dropped as behind a hood it was a file in s3.
+
 AWS Glue provided a mechanism for partitioning and indexing with the limitations: 
 - only partition column could be used as an index
 - only integer and strings could be used as an index
 
 ## Rust Program:
 
-#### _Members_
+#### Members
 
 Rust program workspace had the next members:
 ```rust
@@ -116,9 +123,19 @@ members = [
 
 Why this project structure?
 
-It was designed to allow the separation of _tasks_ and _crates_ in _Cargo.toml_. This separation enabled us to build and manage each component independently, avoiding unnecessary complexity and loading all the crates in once. It also provided better visibility into the performance of individual areas, making it easier to track and optimize and fix each part of the system.
+It was designed to allow the separation of _tasks_ and _crates_ in _Cargo.toml_. This separation enabled us to build and manage each component independently, avoiding unnecessary complexity and loading all the crates in once. It also provided better visibility into the performance of individual members, making it easier to track and optimize and fix.
 
-#### _Schema_
+<div class="mermaid">
+flowchart TD;
+    A["Rust Makefile"] -->|Creates table! macro & struct| B["project_schemas/tables & models"];
+    B -->|Used in| C["project_tasks"];
+    C -->|Also uses| D["project_parquet (props() for SerializedFileWriter Trait + prelude from mod.rs)"];
+    C -->|Executes| E["project_cli"];
+    E -->|Uploads data| S3["project_aws upload()"];
+    E -->|Triggers AWS crawler| AWS["project_aws start_crawler()"];
+</div>
+
+#### Schema
 
 Struct/Table Representation in Rust were in **_project_schemas_**:
 
@@ -228,17 +245,17 @@ pub struct Order {
 ```
 where:
 
-`use uuid::Uuid;`  imports the Uuid type from the uuid crate
+`use uuid::Uuid;`  imports the **Uuid** type from the uuid crate
 
-`use bigdecimal::BigDecimal;` imports the BigDecimal type from the bigdecimal crate. BigDecimal is used to handle arbitrarily large or high-precision decimal numbers. It is commonly used in cases where floating-point precision is not enough.
+`use bigdecimal::BigDecimal;` imports the **BigDecimal** type from the bigdecimal crate. **BigDecimal** is used to handle arbitrarily large or high-precision decimal numbers. It is commonly used in cases where floating-point precision is not enough.
 
-`use chrono::NaiveDateTime;` imports the NaiveDateTime type from the chrono crate. NaiveDateTime is used to represent date and time without timezone information.
+`use chrono::NaiveDateTime;` imports the **NaiveDateTime** type from the chrono crate. **NaiveDateTime** is used to represent date and time without timezone information.
 
 `#[derive(Queryable, Debug)]`
 
 `Queryable:` This is a procedural macro from **diesel**. It automatically generates the necessary code to allow the struct to be used for querying data from the database. It means the **_Order_** struct can be used in diesel queries to map results from the database into instances of the struct.
 
-`Debug:` This is another procedural macro, provided by Rust’s standard library. It automatically generates code to allow the struct to be printed in a human-readable form using `println!("{:?}", ...)`. It makes it easy to debug and print the struct in logs or console output.
+`Debug:` This is another procedural macro, provided by Rust standard library. It automatically generates code to allow the struct to be printed in a human-readable form using `println!("{:?}", ...)`. It makes it easy to debug and print the struct in logs or console output.
 
 The table and struct definitions were organized within the _**project_schemas**_ directory. This directory included the tables and models subdirectories, each housing the respective definitions. Additionally, a **_mod.rs_** file was used to list and manage all the tables and models for easier access and modularity.
 
@@ -270,7 +287,7 @@ project_schemas
 [//]: # (</div>)
 
 
-#### _Tasks_
+#### Tasks
 
 Then we had to combine all the data, add some calculations, write the result into parquet file and upload it to S3 into the designated busket/folder.
 
@@ -300,8 +317,9 @@ In the prelude module, there are imports like `std::time::Instant, diesel::prelu
 The full [prelude](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-task_mod-rs) code.
 
 Which means I can use all public items from this module.
+
 The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name.
-My idea was to use it for generating a file name on the fly in order to provide a file name for writing it down as a parquet file (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function and store it as file name at runtime.
+My idea was to use it for generating a file name on the fly in order to provide a file name for writing it down as a parquet file (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function and store it as file name with writing the result of the calculation at runtime.
 
 In theory, what it does:
 
@@ -360,7 +378,7 @@ use project_schemas::tables::{ ... };
 ```
 This line imports specific modules from **_project_schemas::tables_** module, and it includes additional scoping and aliasing functionality.
 
-What Happens Here:
+What happens here:
 
 `orders::dsl as orders_dsl` imports the dsl module from **_project_schemas::tables::orders_** and renames it as **_orders_dsl_**. I can now use it as **_orders_dsl_** throughout the file.
 **_dsl_** stands for **_domain-specific language_**, which is a set of helper types, methods, or macros to construct _SQL_ queries using the **Diesel** ORM library for working with tables and columns in our postgres database.
@@ -393,61 +411,61 @@ The full task code is [combined_orders.rs](https://gist.github.com/kraftaa/1c60a
 ```rust
 pub fn combined_orders(pg_uri: &str) -> (String, i64) {
     let conn = PgConnection::establish(pg_uri).unwrap();
-    let products_load = Instant::now();
-    let products = products_dsl::products.load::<Product>(&conn).unwrap();
-    trace!("load products took: {:?}", products_load.elapsed());
+    let orders_load = Instant::now();
+    let orders = orders_dsl::orders.load::<Order>(&conn).unwrap();
+    trace!("load orders took: {:?}", orders_load.elapsed());
 ```
 Here:
 
 ```shell
-let products = products_dsl::products.load::<Product>(&conn).unwrap();
+let orders = orders_dsl::orders.load::<Order>(&conn).unwrap();
 ```
-This line brings into scope the _DSLs (Domain-Specific Languages)_ for interacting with tables in the database, which allows to interact with a relational database using the programming language's objects (e.g. structs) instead of writing raw SQL queries. Diesel ensures structs match database schema with implementing trait _**Queryable**_ for the struct. It generates the necessary code to convert a row from a database table into an instance of the struct. The struct fields must match the columns in the database table (in name and type).
+This line brings into scope the _DSLs (Domain-Specific Languages)_ for interacting with tables in the database, which allows us to interact with a relational database using the programming language's objects (e.g. structs) instead of writing raw SQL queries. Diesel ensures structs match database schema with implementing trait _**Queryable**_ for the struct. It generates the necessary code to convert a row from a database table into an instance of the struct. The struct fields must match the columns in the database table (in name and type).
 
-Diesel uses DSLs to generate SQL queries and map the results to Rust types. The _products::dsl, orders::dsl_ etc refer to the corresponding tables, and I'm giving them aliases (_orders_dsl, users_dsl_, ...) for convenience and loading, filtering using DSL methods.
+Diesel uses DSLs to generate SQL queries and map the results to Rust types. The _users::dsl, orders::dsl_ etc refer to the corresponding tables, and I'm giving them aliases (_orders_dsl, users_dsl_, ...) for convenience and loading, filtering using DSL methods.
 
-`products_dsl::products**`
+`orders_dsl::orders**`
 
-`products_dsl` is the alias created for `products::dsl`. _Diesel_ automatically generates a _products_ variable (referring to the _products_ table in the database) within this DSL module, which represents the table in the database.
+`orders_dsl` is the alias created for `orders::dsl`. _Diesel_ automatically generates a _orders_ variable (referring to the _orders_ table in the database) within this DSL module, which represents the table in the database.
 
-``.load::<Product>()`` is a Diesel method used to execute the query and load the results into a collection of Rust structs `Vec<Product>`.
+``.load::<Order>()`` is a Diesel method used to execute the query and load the results into a collection of Rust structs `Vec<Order>`.
 
-`Product` is a Rust struct representing the schema of the _**products**_ table (i.e., it maps the columns of the _**products**_ table to fields in the _**Product**_ struct).
+`Order` is a Rust struct representing the schema of the _**orders**_ table (i.e., it maps the columns of the _**orders**_ table to fields in the _**Order**_ struct).
 
 `&conn` is a reference to a database connection, which is used to execute the query against the database. This connection is established using Diesel’s connection API ( _PgConnection_ for PostgreSQL).
 
-`.unwrap()` is used to unwrap the _Result_ returned by ``load::<Product>()``. This method will either return the query results (if successful) or panic if there was an error.
+`.unwrap()` is used to unwrap the _Result_ returned by ``load::<Order>()``. This method will either return the query results (if successful) or panic if there was an error.
 Usually it is discouraged to use `unwrap` in production code unless I am certain that the query will succeed, as it causes the program to panic on an error.
 We were using `unwrap` as wanted the program to panic and stop running, which would give us a clear sign that the data was not updated.
 If I implemented it now I would rather use `expect` with the custom message but keep the panicking behaviour.
 ```shell
-let products = products_dsl::products
-    .load::<Product>(&conn)
-    .expect("Failed to load products from the database");
+let orders = orders_dsl::orders
+    .load::<Order>(&conn)
+    .expect("Failed to load orders from the database");
 ```
 Or this one to return an error and later handle the error in some way
 
 ```shell
-let products = match products_dsl::products.load::<Product>(conn) {
-        Ok(products) => products,
+let orders = match orders_dsl::orders.load::<Order>(conn) {
+        Ok(orders) => orders,
         Err(e) => {
-            eprintln!("Error loading products: {}", e);
+            eprintln!("Error loading orders: {}", e);
             return Err(e); // Return early with the error
         }
     };
 ```
 Definitely NOT this one `unwrap_or_else` like this 
 ```shell
-let products = products_dsl::products
+let orders = orders_dsl::orders
     .load::<Product>(&conn)
     .unwrap_or_else(|e| {
-        eprintln!("Error loading products: {}", e);
+        eprintln!("Error loading orders: {}", e);
         Vec::new() // Return an empty vector as the fallback
     });
 ```
-as here I will get an empty `Vec<Product>` into my data.
+as here I will get an empty `Vec<Order>` into my data.
 
-Usually the `panic!()` was caused by changes in the underlying Postgres tables, like removed column, unexpected type etc. I couldn't dynamically construct a struct in Rust with Diesel - so if I had a column in my _table!_ macro definition and a struct but if `.load::<Product>` didn't find it - it resulted in panic.
+Usually the `panic!()` was caused by changes in the underlying Postgres tables, like removed column, unexpected type etc. I couldn't dynamically construct a struct in Rust with Diesel - so if I had a column in my _table!_ macro definition and a struct but if `.load::<Order>` didn't find it - it resulted in panic.
 In that case running the task which was loading this table further didn't make sense hence `panic!()` behaviour was justified.
 
 There is also an operator **_?_**  which propagates errors if any occur during the creation of the file avoiding unexpected panic. 
@@ -487,11 +505,11 @@ It returns an iterator of type `std::slice::Iter<'_, T>`, in this case `users` i
 
 `.filter_map(|x| x.order_id).collect()` creates a vector (**order_ids**) that contains the **order_id** field of each **user** from the **users** vector, but only if **order_id** is `Some(i32)`. The `filter_map` function filters out **None** values and collects only `Some(i32)` values into the vector. This results in a list of **order_ids** from **users**.
 
-I want to get **currency**, corresponding with the **product_id** so for that I load **currencies** table, filtering it by two fields: `type` and `type_id`
+I want to get **currency**, corresponding with the **order_id** so for that I load **currencies** table, filtering it by two fields: `type` and `type_id`
 ```rust
 let currencies: Vec<Currency> = currencies_dsl::currencies
-        .filter(currencies_dsl::type.eq("Product"))
-        .filter(currencies_dsl::type_id.eq(any(&products_ids[..])))
+        .filter(currencies_dsl::type.eq("Order"))
+        .filter(currencies_dsl::type_id.eq(any(&orders_ids[..])))
         .load::<Currency>(&conn)
         .unwrap();
 ```
@@ -530,11 +548,6 @@ Values of type **&Currency**, which are references to the **Currency** objects.
 
 Which creates kind of a lookup table, when I can pass a key (type_id = order_id in this case) and get a corresponding **Currency** object with all the fields.
 
-```rust
-    let mut count = 0;
-    let path = "/tmp/combined_orders.parquet";
-    let path_meta = <&str>::clone(&path);
-```
 Before starting the collection of all the data I define the path/name of the future parquet file I'm going to write data into.
 **CombinedOrder** combines fields from both tables and includes a derived field **amount_usd** using the information from currencies table and **amount_with_tax** using the information from **taxes** table.
 
@@ -548,6 +561,7 @@ Before starting the collection of all the data I define the path/name of the fut
 `orders.iter().filter(|order| order.user_id.is_some())` filters out orders where the `user_id` is **None**. This ensures only orders associated with a user are processed further.
 
 The `.map(|o| { ... })` transforms each filtered `order (o)` into a new representation, producing a `CombinedOrderRecord`.
+
 `let currency = currencies_by_order_id_id.get(&o.id)` retrieves the currency information for the current order from the `currencies_by_order_id_id` `HashMap` mapping described above, using the order's `id` as a key. If no entry exists, currency is **None**.
 ```rust
 let conversion_rate = currency
@@ -563,7 +577,7 @@ extracts the conversion rate from the currency (if it exists).
 The logic:
 `currency.map(|x| ...)` operates on the optional **currency** object.
 If a currency exists, its `conversion_rate` is cloned and converted to a **_f64_**. 
-If this fails, an `expect` statement ensures a panic with an error message.
+If conversion `to_f64()` fails, an `expect` statement ensures a panic with an error message.
 If no currency exists (`currency.is_none()`), a default conversion rate of `1.0` is used via `.unwrap_or(1.0)`.
 
 why do I need to use `clone()` for `conversion_rate`: it's due to Rust ownership rules:
@@ -640,7 +654,8 @@ let schema = &parquet_records.schema().unwrap();
 ```
 I'll get `Method schema not found in the current scope for type Vec<FeatureSet>`
 
-    `.schema()` is a method provided by a trait **_ParquetRecordWriter_**, which extracts the Parquet schema from the data structure (`schema()` returns `Result<parquet::schema::types::TypePtr, parquet::errors::ParquetError>`).
+    `.schema()` is a method provided by a trait **_ParquetRecordWriter_**, which extracts the Parquet schema from the data structure (`schema()` returns `Result<parquet::schema::types::TypePtr, parquet::errors::ParquetError>` ).
+
     `.unwrap()` is used to handle the Result type returned by `.schema()`, which will panic if the operation fails. If the schema extraction is successful, it returns the schema object.
 
 3.  Open File for Writing
@@ -670,16 +685,16 @@ I'll get `Method schema not found in the current scope for type Vec<FeatureSet>`
     }
     ```
     where
-    `-> Arc<WriterProperties>` This defines a public function named props that returns a reference-counted (Arc) instance of WriterProperties.
-    _Arc_ stands for **_Atomic Reference Counting_**, which allows safe, shared ownership of data across multiple threads in a concurrent environment.
-    **_WriterProperties_** is a struct from the **_parquet_** crate used to configure properties for writing Parquet files.
+    `pub fn props() -> Arc<WriterProperties>`  defines a public function named props that returns a reference-counted (Arc) instance of **WriterProperties**.
+    **Arc** stands for **_Atomic Reference Counting_**, which allows safe, shared ownership of data across multiple threads in a concurrent environment.
+    `WriterProperties` is a struct from the **_parquet_** crate used to configure properties for writing Parquet files.
     
-    _**WriterProperties::builder()**_  initializes a builder pattern for creating **_WriterProperties_** instances, which allows chaining of configuration methods.
-    **_.set_compression(parquet::basic::Compression::GZIP)_** configures the writer to use **_GZIP_** compression for **_Parquet_** file output.
-    **_parquet::basic::Compression::GZIP_** specifies GZIP as the compression codec.
-    **_.build()_** finalizes and constructs an instance of **_WriterProperties_** with the specified settings.
-    **_Arc::new(...)_** wraps the created **_WriterProperties_** inside an **_Arc_**, enabling shared ownership.
-    
+    `WriterProperties::builder()`*  initializes a builder pattern for creating `WriterProperties` instances, which allows chaining of configuration methods.
+    `.set_compression(parquet::basic::Compression::GZIP)` configures the writer to use **_GZIP_** compression for **_Parquet_** file output.
+    `parquet::basic::Compression::GZIP` specifies GZIP as the compression codec.
+    `.build()` finalizes and constructs an instance of `WriterProperties` with the specified settings.
+    `Arc::new(...)` wraps the created `WriterProperties` inside an **_Arc_**, enabling shared ownership.
+     
 4.  Write Data to the File
     
     ```rust
@@ -692,15 +707,15 @@ I'll get `Method schema not found in the current scope for type Vec<FeatureSet>`
     println!("{} count", count);
     ```
 
-    **_pfile.next_row_group():_**
+    `pfile.next_row_group():`
     Prepares the next row group for writing.
     Row groups are logical blocks of rows within a Parquet file.
-    **_write_to_row_group:_**
-    Serializes the **_parquet_records_** and writes them to the current row group.
+    `write_to_row_group:`
+    Serializes the `parquet_records` and writes them to the current row group.
     Panics with a custom error message if writing fails.
-    **_pfile.close_row_group(row_group):_**
+    `pfile.close_row_group(row_group):`
     Closes the row group after writing.
-    **_count:_**
+    `count:`
     Tracks the number of row groups written.
     This code increments and prints it.
     
@@ -720,21 +735,57 @@ I'll get `Method schema not found in the current scope for type Vec<FeatureSet>`
     (path.into(), rows_number)
     ```
 
-    **_SerializedFileReader::try_from(path_meta):_**
-    Opens the written Parquet file for reading. Here, path is borrowed, this is because the method **_try_from_** doesn't take ownership of **_path_** variable, it takes a reference (_&path_), and so no ownership transfer occurs. The ownership of _path_ remains with the original variable.
+    `SerializedFileReader::try_from(path):`
+    Opens the written Parquet file for reading. Here, path is borrowed, this is because the method `try_from` doesn't take ownership of `path` variable, it takes a reference (`&path`), and so no ownership transfer occurs. The ownership of `path` remains with the original variable.
     Reads the file metadata for verification or further processing.
-    **_file_metadata.num_rows():_**
+    `file_metadata.num_rows():`
     Retrieves the number of rows written to the file.
-    **_(path.into(), rows_number):_**
-    Returns the file _path_ and the number of rows as the output of the task.
-    The **_into()_** method consumes _path_ and attempts to convert it into the type specified in the tuple (_String_ for this function).
+    `(path.into(), rows_number):`
+    Returns the file `path` and the number of rows as the output of the task.
+    The `into()` method consumes `path` and attempts to convert it into the type specified in the tuple (**String** for this function).
 
-#### _Streaming Tasks_
+7. Running the task
+   After we defined the function `pub fn combined_orders()` we need to implement the trait to run the task that fetches data and stores it. 
+   For that after the function we have:
+
+```rust
+pub struct CombinedOrdersTask {}
+
+impl ProjectTask for CombinedOrdersTask {
+    fn run(&self, postgres_uri: &str) -> (String, i64) {
+        combined_orders(postgres_uri)
+    }
+}
+```
+`CombinedOrdersTask` is an empty public struct, used as a unit struct to represent a specific task related to processing combined orders.
+It acts as a concrete implementation of the `ProjectTask` trait.
+
+The `run` function is implemented to execute the `combined_orders` function, which processes data from the PostgreSQL database.
+It follows the `ProjectTask` trait signature (`fn run(&self, postgres_uri: &str) -> (String, i64);`).
+
+where `ProjectTask` (defined in prelude in `project_tasks/mod.rs`) is:
+
+```rust
+pub trait ProjectTask: Sync + Send + RefUnwindSafe + UnwindSafe {
+    fn run(&self, postgres_uri: &str) -> (String, i64);
+}
+```
+What it does:
+
+This defines a trait `ProjectTask` that any implementing type must satisfy.
+Types implementing `ProjectTask` must:
+- Be thread-safe (`Sync and Send`).
+- Be safe to use across unwind boundaries (`RefUnwindSafe and UnwindSafe`).
+- Provide a `run` function with the specified signature, which takes a PostgreSQL connection string (`postgres_uri`) and returns a tuple `(String, i64)`.
+
+This trait is used to define a shared interface for a family of tasks that can perform some operation and return results.
+
+#### Streaming Tasks
 
 Because our program started from reading small-normal size tables we started using **_Diesel_**, but then we got hit by program getting OOM or getting into the conflict with RDS instance due to loading the huge volume of data at once from the big tables.
 To handle that some tasks were recreated using **_sqlx_** crate, which was used for asynchronously reading large tables from a PostgreSQL, processing the data, and writing it to a Parquet file format.
 
-Why Use **_sqlx_** Instead of diesel for Large Tables?
+Why use **_sqlx_** instead of diesel for large tables?
 
 **Asynchronous Database Access (Key Advantage):** 
 
@@ -744,7 +795,7 @@ In contrast, _**diesel**_ primarily uses synchronous operations, which can cause
 
 **Efficient Streaming of Large Data:**
 
-The code uses **_sqlx::query_as_** and **_.fetch(&pool)_** to stream results.
+The code uses `sqlx::query_as` and `.fetch(&pool)` to stream results.
 Streaming helps in processing large tables in chunks instead of loading everything into memory at once.
 
 **Lightweight and Compile-time Checked Queries**
@@ -754,7 +805,7 @@ _**Diesel**_ often requires complex query-building and lacks full async support.
 
 **Flexibility with Dynamic Queries**
 
-_**sqlx**_ allows direct string-based SQL queries (**_query_as::<sqlx::Postgres, RequestRecordStream>(&query);_**), making it easier to work with dynamic queries.
+_**sqlx**_ allows direct string-based SQL queries (`query_as::<sqlx::Postgres, User>(&query);`), making it easier to work with dynamic queries.
 **Diesel**'s ORM-like approach can be restrictive when working with dynamically changing query structures.
 
 In the example below I'm constructing the query with extra fields via 
@@ -791,8 +842,8 @@ async fn main() -> Result<()> {
     // Fetch users based on dynamic filters
     let users = fetch_users(&pool, filters).await?;
 ```
-where `WHERE 1=1` allows appending conditions without worrying about the first AND clause.
-Conditions are added based on available filters (email, min_date). If additional filters are added, the query adapts accordingly.
+where `WHERE 1=1` allows appending conditions without worrying about the first `AND` clause.
+Conditions are added based on available filters (`email, min_date`). If additional filters are added, the query adapts accordingly.
 The query string is built dynamically at runtime. 
 
 when with Diesel it would look like
@@ -814,15 +865,15 @@ fn fetch_users(conn: &PgConnection, user_name: Option<&str>, user_email: Option<
     query.load::<User>(conn).expect("Error loading users")
 }
 ```
-So for each extra filter value in Diesel I need to write extra code, when for the each extra filter value in sqlx I just add the filter line to the code.
+So for each extra filter value in **Diesel** I need to write extra code, when for each extra filter value in **sqlx** I just add the filter line to the code.
 
-sqlx allows: 
+**_sqlx_** allows: 
 - String-Based Query Construction: I can construct queries dynamically without predefined schema definitions.
 - Flexibility with Input: Supports building queries based on user-provided filters without writing multiple query versions.
 - No Compile-Time Schema Enforcement(very important if I want to check what I'm getting): Unlike Diesel, sqlx allows running ad-hoc queries without defining schema structs.
 
-For **_sqlx_**  I have traits `ProjectStreamTask` and `HugeStreamTask`  which define an interface to run asynchronous tasks that interact with PostgreSQL and return results.
-They enforce that implementing structs must be **_Send + Sync + Debug + UnwindSafe_**, ensuring thread safety and error resilience.
+For **_sqlx_**  `mod.rs` I have traits `ProjectStreamTask` and `HugeStreamTask`  which define an interface to run asynchronous tasks that interact with PostgreSQL and return results.
+They enforce that implementing structs must be `Send + Sync + Debug + UnwindSafe`, ensuring thread safety and error resilience.
 ```rust
 #[async_trait]
 pub trait ProjectStreamTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
@@ -834,21 +885,21 @@ pub trait HugeStreamTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
     async fn run(&self, postgres_uri: &str) -> Vec<(NaiveDate, PathBuf, u128, i64)>;
 }
 ```
-In the streaming task the **_RequestRecordStream_** struct, derived with **_ParquetRecordWriter_** and **_sqlx::FromRow_**, and **_Default_** and **_Debug_** which provide automatic implementations of functionalities that help with extracting struct field names, fetching data from Postgres and writing it to Parquet files.
+In the [streaming_task.rs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-streaming_task-rs) the `ProductRecordStream` struct, derived with `ParquetRecordWriter` and `sqlx::FromRow`, and `Default` and `Debug` which provide automatic implementations of functionalities that help with extracting struct field names, fetching data from Postgres and writing it to Parquet files.
 
-**_sqlx::FromRow_**  derive macro enables the struct to be used with SQLx to map database query results directly into Rust structs.
+`sqlx::FromRow`  derive macro enables the struct to be used with SQLx to map database query results directly into Rust structs.
 
-It allows SQLx to deserialize rows from a database query into instances of **_RequestRecordStream_**.
+It allows SQLx to deserialize rows from a database query into instances of `ProductRecordStream`.
 
 For example, using this query SQLx will automatically map the database columns to the corresponding struct fields.
 ```
-let result = sqlx::query_as::<sqlx::Postgres, RequestRecordStream>(&query).fetch(&pool);
+let result = sqlx::query_as::<sqlx::Postgres, ProductRecordStream>(&query).fetch(&pool);
 ```
-**_ParquetRecordWriter_**  derive macro enables automatic writing of struct instances to Parquet files.
+`ParquetRecordWriter`  derive macro enables automatic writing of struct instances to Parquet files.
 
-**_Default_** derive macro provides a way to create a default value for a struct (or other types) when no specific values are provided.
+`Default` derive macro provides a way to create a default value for a struct (or other types) when no specific values are provided.
 
-When the **_Default_** trait is derived, Rust will automatically generate an implementation for it that initializes all struct fields with their respective default values.
+When the `Default` trait is derived, Rust will automatically generate an implementation for it that initializes all struct fields with their respective default values.
 Default values for standard types in Rust:
 ```rust
 i64 → 0
@@ -861,25 +912,25 @@ bool → false
 
 This task:
 ```rust
-pub async fn requests(pg_uri: &str) -> anyhow::Result<(String, i64)> {
+pub async fn products(pg_uri: &str) -> anyhow::Result<(String, i64)> {
 ```
-1. Connecting to PostgreSQL 
+Connecting to PostgreSQL 
 ```rust
 let pool = PgPool::connect(pg_uri).await?;
 ```
 
-Creating a Placeholder Struct Instance: This creates a vector with a default instance of RequestRecordStream to:
+Creating a Placeholder Struct Instance: This creates a vector with a default instance of `ProductRecordStream` to:
 - Simulate a dataset structure.
 - Use it for schema introspection to dynamically build the query.
-```rust
-  let fake_requests = vec![RequestRecordStream {
-    ..Default::default()
-  }];
 
+```rust
+let fake_products = vec![ProductRecordStream { 
+  ..Default::default()
+}];
 ```
-Why do I need this placeholder? Because this placeholder struct instance is used to introspect the schema of RequestRecordStream dynamically. In Rust, struct fields aren't accessible at runtime in the same way as in dynamic languages (e.g., Python). Instead, I need to create an instance of the struct to analyze its fields and types.
-The struct **_RequestRecordStream_** is annotated with **_#[derive(ParquetRecordWriter, sqlx::FromRow)]._** These derive macros enable schema extraction.
-Creating a default instance (**_..Default::default()_**) allows access to the schema, which is used later in the code to generate a list of database columns.
+Why do I need this placeholder? Because this placeholder struct instance is used to introspect the schema of `ProductRecordStream` dynamically. In Rust, struct fields aren't accessible at runtime in the same way as in dynamic languages (e.g., Python). Instead, I need to create an instance of the struct to analyze its fields and types.
+The struct `ProductRecordStream` is annotated with `#[derive(ParquetRecordWriter, sqlx::FromRow)].` These derive macros enable schema extraction.
+Creating a default instance (`..Default::default()`) allows access to the schema, which is used later in the code to generate a list of database columns.
 
 Since the struct fields represent database columns, creating an instance helps dynamically determine column names required for query building.
 Without this, I would need to hard-code column names (like in the 'normal' tasks described above), which reduces flexibility.
@@ -890,21 +941,102 @@ The obvious advantages:
 
 Extracting Schema Information from the Struct
 ```rust
-let vector_for_schema = &fake_requests;
-let schema = vector_for_schema.as_slice().schema().unwrap();
-let schema_2 = vector_for_schema.as_slice().schema().unwrap();
-let schema_vec = schema_2.get_fields();
+let schema = fake_products.as_slice().schema().unwrap();
+let schema_2 = fake_products.as_slice().schema().unwrap();
+let schema_vec = schema.get_fields();
 ```
 The code extracts schema details from the sample data.
-**_vector_for_schema.as_slice().schema().unwrap()_** retrieves schema metadata, such as field names and types.
-**_schema_vec = schema_2.get_fields();_** gets a list of fields (columns) for further processing.
+`fake_products.as_slice().schema().unwrap()` retrieves schema metadata, such as field names and types.
 
-Building Field Names for SQL Query
+`schema_vec = schema_2.get_fields();` gets a list of fields (columns) for further processing.
+
+Why do I need both `schema` and `schema_2`? Because of Rust ownership rules we can have all different kinds of errors while trying to use some variable which we don't own anymore.
+
+later in the function I have:
+```rust
+for i in schema_vec {
+... .
+}
+let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
+let fields: &str = &fields.join(", ");
+
+```
+If I only have `schema` and then do `let schema_vec = schema.get_fields();` then I get an error 
+```rust
+let schema_vec = schema.get_fields();
+   |             ------------------- borrow of `schema` occurs here
+...
+let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
+   |                                            ^^^^^^ move out of `schema` occurs here
+...
+let fields: &str = &fields.join(", ");
+   |                ----------------- borrow later used here
+
+```
+Why?
+```rust
+let schema = fake_products.as_slice().schema().unwrap();
+let schema_vec = schema.get_fields();
+```
+`schema` is a binding that holds a value (an instance of Schema).
+`schema_vec` borrows from schema by calling `.get_fields()`.
+
+`let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();`
+
+`schema` is moved into `SerializedFileWriter::new()` after this move, schema cannot be used anymore in this function.
+
+`let fields: &str = &fields.join(", ");` if `schema_vec` is still being used after `schema` was moved, the borrow becomes invalid because schema no longer exists.
+
+
+Rust enforces ownership and borrowing rules:
+
+- If a value is moved, it cannot be used again.
+- If a value is borrowed, it cannot be moved while it is still borrowed.
+
+In my case:
+
+`schema_vec` borrows schema when calling `.get_fields()`.
+`schema` is moved into `SerializedFileWriter::new()`, invalidating the borrow.
+
+Could be fixed by doing `let mut pfile = SerializedFileWriter::new(file, schema.clone(), props()).unwrap();` so here `schema.clone()` creates a new copy, and `schema` remains valid.
+I can Not do `SerializedFileWriter::new(file, &schema, props())` because `SerializedFileWriter` expects `Arc<Type>` not `&Arc<Type>`.
+
+If I do `let schema_vec = &schema.get_fields();` then I get 
+```rust
+36 |     for i in schema_vec {
+   |              ^^^^^^^^^^ `&&[std::sync::Arc<dracula_parquet::prelude::parquet::schema::types::Type>]` is not an iterator
+   |
+   = help: the trait `std::iter::Iterator` is not implemented for `&&[std::sync::Arc<dracula_parquet::prelude::parquet::schema::types::Type>]`
+   = note: required for `&&[std::sync::Arc<dracula_parquet::prelude::parquet::schema::types::Type>]` to implement `std::iter::IntoIterator`
+
+```
+
+If I try to clone my vector `let schema = fake_products.clone().as_slice().schema().unwrap();` I'd get an error about trait `Copy` not being satisfied and if I add `#[derive(Clone)]` to my struct I'd get the same error about `borrow of `schema``.
+
+If I do `let schema_vec = schema.clone().get_fields();` I'd get 
+```rust
+let schema_vec = schema.clone().get_fields();
+                 ^^^^^^^^^^^^^^             - temporary value is freed at the end of this statement
+                 |
+                 creates a temporary value which is freed while still in use
+...
+for i in schema_vec {
+         ---------- borrow later used here
+```
+which means:
+`schema.clone()` creates a temporary clone of schema.
+Then, `.get_fields()` is called on that temporary clone.
+However, because `clone()` returns a temporary value, it gets dropped at the end of the statement.
+
+`schema_vec` now holds a reference to a value that no longer exists, leading to a use-after-free error when I'm trying to use it later in:
+`for i in schema_vec { // Borrowing freed value`
+
+Building field names for SQL Query:
 ```rust
 let mut fields: Vec<&str> = vec![];
 for i in schema_vec {
     if i.name() == "uuid" {
-        fields.push("uuid::varchar") // because parquet wasn't supporting uuid writing
+        fields.push("uuid::varchar") // because parquet wasn't supporting uuid type writing
     } else if .. {
         ... 
     } else {
@@ -914,27 +1046,26 @@ for i in schema_vec {
 println!("{:?} fields!", fields);
 ```
 This loop iterates over all schema fields and dynamically constructs SQL-friendly field names:
-- If the field is named _uuid_, it converts it to **_uuid::varchar_** to ensure proper type handling in SQL queries.
+- If the field is named `uuid`, it converts it to `uuid::varchar` to ensure proper type handling in SQL queries.
 - Other fields are pushed as-is.
 The final field list is printed for debugging purposes.
 
-Setting Up Parquet File Writing
+Setting up parquet file writing
 ```rust
-let requests_load = Instant::now();
-let path = "/tmp/requests.parquet";
-let path_meta = <&str>::clone(&path);
+let products_load = Instant::now();
+let path = "/tmp/products.parquet";
 
-let file = std::fs::File::create(path).unwrap();
+let file = std::fs::File::create(&path).unwrap();
 let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
 ```
-_**Instant::now()**_ tracks how long the operation takes.
-A Parquet file path is defined as **_"/tmp/requests.parquet"_**.
-The file is created using **_std::fs::File::create(path)_**.
-A Parquet writer (_**SerializedFileWriter**_) is initialized with the schema and file properties.
+`Instant::now()` tracks how long the operation takes.
+A Parquet file path is defined as `"/tmp/products.parquet"`.
+The file is created using `std::fs::File::create(path)`.
+A Parquet writer (`SerializedFileWriter`) is initialized with the schema and file properties.
 
 Constructing the SQL Query
 ```rust
-let table: &str = "requests";
+let table: &str = "products";
 
 let mut query = "SELECT ".to_owned();
 let fields: &str = &fields.join(", ");
@@ -942,19 +1073,19 @@ query.push_str(fields);
 query.push_str(" FROM ");
 query.push_str(table);
 ```
-A _**SELECT**_ query is dynamically built by concatenating the extracted field names and ppending the table name (_requests_).
+A `SELECT` query is dynamically built by concatenating the extracted field names and appending the table name (`products`).
 
-Query Execution with SQLX (**_query_as_**): Executes the SQL query asynchronously and streams results.
+Query Execution with SQLX (`query_as`): Executes the SQL query asynchronously and streams results.
 
 ```rust
-let result = sqlx::query_as::<sqlx::Postgres, RequestRecordStream>(&query);
-let requests_stream = result.fetch(&pool);
+let result = sqlx::query_as::<sqlx::Postgres, ProductRecordStream>(&query);
+let product_stream = result.fetch(&pool);
 ```
 
 
 Processing Data in Chunks (5000 rows at a time): Streams rows from the database and writes them to a Parquet file in chunks.
 ```rust
-let mut chunk_stream = requests_stream.map(|fs| fs.unwrap()).chunks(5000);
+let mut chunk_stream = products_stream.map(|fs| fs.unwrap()).chunks(5000);
 while let Some(chunks) = chunk_stream.next().await {
     let mut row_group = pfile.next_row_group().unwrap();
     (&chunks[..])
@@ -963,255 +1094,22 @@ while let Some(chunks) = chunk_stream.next().await {
     pfile.close_row_group(row_group).unwrap();
 }
 ```
-
-Trait Implementation (RequestStreamingTask): Implements the trait to run the task that fetches data and stores it.
+Trait Implementation (`ProductStreamingTask`): implements the trait to run the task that fetches data and stores it.
 ```rust
+use async_trait::async_trait;
+#[derive(Debug)]
+pub struct ProductStreamTask {}
 #[async_trait]
-impl ProjectStreamingTask for RequestStreamingTask {
+impl ProjectStreamTask for ProductStreamTask {
     async fn run(&self, postgres_uri: &str) -> (String, i64) {
-        requests(postgres_uri).await.unwrap()
+        products(postgres_uri).await.unwrap()
     }
 }
 ```
 
-#### _Parquet Writer_
 
-In order to be able to write files into parquet I'm using the crates `parquet` and `parquet_derive` as well as extra methods from `project_parquet` defined by us:
-
-in `project_parquet`
-```rust
-use parquet::file::properties::WriterProperties;
-use std::sync::Arc;
-use parquet::file::writer::{ParquetWriter, SerializedFileWriter}; 
-
-pub fn props() -> Arc<WriterProperties> {
-    Arc::new(
-        WriterProperties::builder()
-            .set_compression(parquet::basic::Compression::GZIP)
-            .build(),
-    )
-}
-
-pub trait FileWriterRows {
-    fn total_num_rows(&mut self) -> &i64;
-}
-
-impl<W: 'static + ParquetWriter> FileWriterRows for SerializedFileWriter<W> {
-    fn total_num_rows(&mut self) -> &i64 {
-        &50
-
-    }
-} 
-pub mod prelude {
-
-    pub use super::props;
-    pub use super::FileWriterRows;
-    pub use parquet::file::properties::WriterProperties;
-    pub use parquet::file::writer::{FileWriter, SerializedFileWriter};
-    pub use parquet::record::RecordWriter;
-
-}
-```
-Where:
-
-`WriterProperties` – Provides configuration settings for Parquet file writing (e.g., compression).
-`Arc` – A thread-safe reference-counting pointer to allow shared ownership across threads.
-`ParquetWriter` & `SerializedFileWriter` – Handle the writing of data to Parquet files.
-
-Function `fn props()`:
-```rust
-pub fn props() -> Arc<WriterProperties> {
-   Arc::new(
-     WriterProperties::builder()
-     .set_compression(parquet::basic::Compression::GZIP)
-     .build(),
-   )
-}
-```
-Creates and returns Parquet writer properties wrapped in an `Arc`, which allows safe sharing across multiple threads.
-`set_compression(parquet::basic::Compression::GZIP)` – Sets the compression type to GZIP for efficient storage.
-
-
-Trait: `FileWriterRows`
-```rust
-pub trait FileWriterRows {
-   fn total_num_rows(&mut self) -> &i64;
-}
-```
-Defines a trait with a method `total_num_rows` that should return a reference to an `i64` (indicating the number of rows written).
-
-Trait Implementation for `SerializedFileWriter`
-```rust
-impl<W: 'static + ParquetWriter> FileWriterRows for SerializedFileWriter<W> {
-   fn total_num_rows(&mut self) -> &i64 {
-    // &50
-    &self.total_num_rows
-   }
-}
-```
-Implements the FileWriterRows trait for `SerializedFileWriter<W>`, which is responsible for writing Parquet data to a file.
-The issue: we used to have `&self.total_num_rows` from  `parquet::file::writer::SerializedFileWriter`
-```rust
-pub struct SerializedFileWriter<W: ParquetWriter> {
-    buf: W,
-    schema: TypePtr,
-    descr: SchemaDescPtr,
-    props: WriterPropertiesPtr,
-    total_num_rows: i64,...
-```
-but after another crate update it became a private field so we lost access to it. TODO was to figure it out but at the end we just hardcoded a meaningless number.
-
-5. Module: prelude
-```rust
-pub mod prelude {
-   pub use super::props;
-   pub use super::FileWriterRows;
-   pub use parquet::file::properties::WriterProperties;
-   pub use parquet::file::writer::{FileWriter, SerializedFileWriter};
-   pub use parquet::record::RecordWriter;
-   }
-```
-Provides a convenient way to import commonly used items by simply writing use `project_parquet::prelude::*;`.
-
-[//]: # ()
-[//]: # (We used to have)
-
-[//]: # (```rust)
-
-[//]: # (let props = Arc::new&#40;WriterProperties::builder&#40;&#41;.build&#40;&#41;&#41;;)
-
-[//]: # (let schema = inputs[0].1.file_metadata&#40;&#41;.schema_descr&#40;&#41;.root_schema_ptr&#40;&#41;;)
-
-[//]: # (let mut writer = SerializedFileWriter::new&#40;output, schema, props&#41;?;)
-
-[//]: # (```)
-
-[//]: # (while using the previous version of parquet crate.)
-
-[//]: # ()
-[//]: # (This snippet sets up a Parquet file writer with the following:)
-
-[//]: # ()
-[//]: # (**_Properties &#40;props&#41;_**: Specifies settings like compression and encoding.)
-
-[//]: # (**_Schema &#40;schema&#41;_**: Defines the structure of the data.)
-
-[//]: # (**_File Writer &#40;writer&#41;_**: Prepares the output destination for writing Parquet data.)
-
-[//]: # (This is the initialization step before writing rows of data into a Parquet file.)
-
-[//]: # ()
-[//]: # (Where:)
-
-[//]: # (**_WriterProperties_** were used to configure properties for writing Parquet files.)
-
-[//]: # (Common configurations include compression algorithms, encoding, and other optimizations.)
-
-[//]: # (**_WriterProperties::builder&#40;&#41;_** provides a builder pattern to customize these properties.)
-
-[//]: # ()
-[//]: # (**_Arc::new&#40;...&#41;:_**: **_Arc_** stands for **_Atomic Reference Counting_**, a smart pointer for shared ownership across threads.)
-
-[//]: # (In this case, it ensures that the **_WriterProperties_** can be shared safely if multiple threads are involved &#40;so different parts of my program &#40;running concurrently in separate threads&#41; might need to access and use the same instance of **_WriterProperties_**&#41;.)
-
-[//]: # (The **_Arc_** wraps the **_WriterProperties_** object so it can be accessed concurrently in a thread-safe manner.)
-
-[//]: # ()
-[//]: # (in `let schema = inputs[0].1.file_metadata&#40;&#41;.schema_descr&#40;&#41;.root_schema_ptr&#40;&#41;;`)
-
-[//]: # (_**inputs**_: is a collection holding data or file-related information.)
-
-[//]: # (Accessing inputs[0].1 implies the structure is a tuple &#40;e.g., &#40;x, y&#41;&#41; where the second element &#40;1&#41; holds Parquet metadata or file-related information.)
-
-[//]: # ()
-[//]: # (_**file_metadata&#40;&#41;**_: retrieves metadata about the Parquet file, such as schema, row group details, and other properties.)
-
-[//]: # (**_schema_descr&#40;&#41;_**:)
-
-[//]: # ()
-[//]: # (Returns a descriptor of the Parquet schema, which describes the structure of the data &#40;columns, types, etc.&#41;.)
-
-[//]: # (_**root_schema_ptr&#40;&#41;**_: gets a pointer to the root schema of the Parquet file.)
-
-[//]: # (This is required to define the structure of the output Parquet file.)
-
-[//]: # ()
-[//]: # (`let mut writer = SerializedFileWriter::new&#40;output, schema, props&#41;?;`)
-
-[//]: # (**_SerializedFileWriter_**: a key component in the parquet crate for writing Parquet files.)
-
-[//]: # (It handles the serialization of data into the Parquet file format.)
-
-[//]: # ()
-[//]: # (**_new&#40;&#41;_**: creates a new instance of the file writer.)
-
-[//]: # (Takes the following arguments:)
-
-[//]: # (**_output_**: The output destination where the Parquet file will be written. This could be a file, stream, or buffer.)
-
-[//]: # (_**schema**_: The schema descriptor &#40;retrieved earlier&#41; that defines the structure of the data being written.)
-
-[//]: # (**_props_**: The writer properties &#40;e.g., compression settings&#41; defined earlier.)
-
-[//]: # (?: the ? operator propagates errors if any occur during the creation of the file writer avoiding unexpected panic. Requires `Result/Option` return: )
-
-[//]: # (If the operation returns _**Ok&#40;value&#41;**_, it extracts the value and continues execution.)
-
-[//]: # (If the operation returns **_Err&#40;error&#41;_**, it propagates the error to the calling function.)
-
-[//]: # ()
-[//]: # (The difference with possible usage of **_unwrap&#40;&#41;_** is that `unwrap&#40;&#41;` panics on Error:)
-
-[//]: # ()
-[//]: # (If the operation returns _**Ok&#40;value&#41;**_, it extracts the value and continues execution.)
-
-[//]: # (If the operation returns **_Err&#40;error&#41;_**, it panics, terminating the program.)
-
-After we defined the function `pub fn combined_orders()` we need to call/execute it. For that after the function we have: 
-
-```rust
-pub struct CombinedOrdersTask {}
-
-impl ProjectTask for CombinedOrdersTask {
-    fn run(&self, postgres_uri: &str) -> (String, i64) {
-        combined_orders(postgres_uri)
-    }
-}
-```
-**_CombinedOrdersTask_** is an empty public struct, used as a unit struct to represent a specific task related to processing combined orders.
-It acts as a concrete implementation of the **_ProjectTask_** trait.
-
-The **_run_** function is implemented to execute the **_combined_orders_** function, which processes data from the PostgreSQL database.
-It follows the **_ProjectTask_** trait signature (**_fn run(&self, postgres_uri: &str) -> (String, i64);_**).
-
-where `ProjectTask` (defined in prelude in `mod.rs`) is:
-
-```rust
-pub trait ProjectTask: Sync + Send + RefUnwindSafe + UnwindSafe {
-    fn run(&self, postgres_uri: &str) -> (String, i64);
-}
-```
-What it does:
-
-This defines a trait `ProjectTask` that any implementing type must satisfy.
-Types implementing **_ProjectTask_** must:
-- Be thread-safe (_**Sync and Send**_).
-- Be safe to use across unwind boundaries (**_RefUnwindSafe and UnwindSafe_**).
-- Provide a _**run**_ function with the specified signature, which takes a PostgreSQL connection string (**_postgres_uri_**) and returns a tuple **_(String, i64)_**.
-
-This trait is used to define a shared interface for a family of tasks that can perform some operation and return results.
-
-In `mod.rs` I also have a definition of async trait `ProjectStreamingTask` for the streaming tasks.
-
-```rust
-#[async_trait]
-pub trait ProjectStreamingTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
-    async fn run(&self, postgres_uri: &str) -> (String, i64);
-}
-```
-
-Similar to **_ProjectTask_**, this defines a trait for asynchronous tasks.
-The #[async_trait] attribute allows the run function to be an **_async fn_**, enabling asynchronous operations within the trait implementation.
+Similar to `ProjectTask`, this defines a trait for asynchronous tasks.
+The `#[async_trait]` attribute allows the run function to be an `async fn`, enabling asynchronous operations within the trait implementation.
 It's  designed for streaming tasks that may involve asynchronous operations, such as reading data from a database, processing it, and returning results.
 Types implementing this trait must also be thread-safe and debug-friendly.
 
@@ -1221,19 +1119,19 @@ Types implementing this trait must also be thread-safe and debug-friendly.
   <script>hljs.highlightAll();</script>
   <summary>More details about <code><strong>Thread-Safe</strong></code> (Sync and Send) traits</summary>
 
-  A type that implements <em>Send</em> can safely be transferred between threads.<br>
-  For example, if a type is <em>Send</em>, it can be passed to a thread or moved into a thread pool for parallel execution.<br>
-  Most primitive types in <em>Rust</em> (like integers and String) are <em>Send</em> by default. However, types that contain raw pointers or manage non-thread-safe resources might not be.<br>
-  (Raw pointers in Rust are <em>*const T</em> (immutable) and <em>*mut T</em> (mutable). These are low-level constructs that provide direct memory access, similar to pointers in C or C++. Unlike Rust's references (&T and &mut T).<br>
+A type that implements <em>Send</em> can safely be transferred between threads.<br>
+For example, if a type is <em>Send</em>, it can be passed to a thread or moved into a thread pool for parallel execution.<br>
+Most primitive types in <em>Rust</em> (like integers and String) are <em>Send</em> by default. However, types that contain raw pointers or manage non-thread-safe resources might not be.<br>
+(Raw pointers in Rust are <em>*const T</em> (immutable) and <em>*mut T</em> (mutable). These are low-level constructs that provide direct memory access, similar to pointers in C or C++. Unlike Rust's references (&T and &mut T).<br>
 
-  <code><strong>Raw pointers</strong></code>:<br> 
+<code><strong>Raw pointers</strong></code>:<br>
   <ul>Lack Safety Guarantees:<br>
-    
+
   <li>They do not enforce borrow checking, lifetimes, or ownership rules.</li>
   <li>This means I can create dangling pointers, null pointers, or data races if not handled carefully.</li>
   <li>Use Cases:</li>
-    
-  Raw pointers are typically used in unsafe code for advanced scenarios, such as:<br>
+
+Raw pointers are typically used in unsafe code for advanced scenarios, such as:<br>
   <li>Interfacing with C code.</li>
   <li>Optimizing performance when known that the operations are safe.</li>
   <li>Implementing custom data structures or memory allocators.</li>
@@ -1242,34 +1140,34 @@ Types implementing this trait must also be thread-safe and debug-friendly.
   <pre><code class="language-rust">
     let x = 1;
     let raw_ptr: *const i32 = &x;
-    
+
     unsafe {
         println!("Value at raw pointer: {}", *raw_ptr); // Unsafe block is required
     }
-  </code></pre>
-    
-  <strong><em>Non-Thread-Safe Resources</em></strong>
-  <em>Non-thread-safe</em> resources are types or constructs that cannot safely be shared or accessed by multiple threads simultaneously. 
-  These might include:<br>
-    
-  <em>Rc&lt;T&gt;(Reference Counted Smart Pointer)</em><br>
-  <em>Rc&lt;T&gt;</em> provides shared ownership of a value but is not thread-safe because it doesn’t use atomic operations to manage the reference count.
-  Instead, <em>Arc&lt;T&gt;</em> (atomic reference counter) is used for thread-safe shared ownership.
-    
-  Example:
+</code></pre>
+
+<strong><em>Non-Thread-Safe Resources</em></strong>
+<em>Non-thread-safe</em> resources are types or constructs that cannot safely be shared or accessed by multiple threads simultaneously.
+These might include:<br>
+
+<em>Rc&lt;T&gt;(Reference Counted Smart Pointer)</em><br>
+<em>Rc&lt;T&gt;</em> provides shared ownership of a value but is not thread-safe because it doesn’t use atomic operations to manage the reference count.
+Instead, <em>Arc&lt;T&gt;</em> (atomic reference counter) is used for thread-safe shared ownership.
+
+Example:
   <pre><code class="language-rust">
   use std::rc::Rc;
   let data = Rc::new(42);
   let cloned = Rc::clone(&data); // Safe in a single-threaded context
   // Rc is NOT `Send`, so it cannot be shared between threads
   </code></pre>
-    
-  <strong><em>Unsafe Data Structures</em></strong>
-  Structures that allow direct, uncontrolled access to their internals, like raw pointers or custom synchronization primitives without proper locking mechanisms.<br>
-    
-  Global state:<br>
-  Global variables or mutable static variables can lead to data races if accessed without proper synchronization.<br>
-  Example of Non-Thread-Safe Code:<br>
+
+<strong><em>Unsafe Data Structures</em></strong>
+Structures that allow direct, uncontrolled access to their internals, like raw pointers or custom synchronization primitives without proper locking mechanisms.<br>
+
+Global state:<br>
+Global variables or mutable static variables can lead to data races if accessed without proper synchronization.<br>
+Example of Non-Thread-Safe Code:<br>
   <pre><code class="language-rust">
   use std::cell::RefCell;
   let data = RefCell::new(5);
@@ -1277,22 +1175,22 @@ Types implementing this trait must also be thread-safe and debug-friendly.
   *data.borrow_mut() = 10;
   </code></pre>
 
-  <strong><em>Thread-Safe Alternatives</em></strong>
-  For non-thread-safe types, Rust provides thread-safe alternatives:<br>
-    
-  Instead of <em>Rc&lt;T&gt;</em>: Use <em>Arc&lt;T&gt;</em> for thread-safe reference counting.
-  Instead of <em>RefCell&lt;T&gt;</em>: Use <em>Mutex&lt;T&gt;</em> or <em>RwLock&lt;T&gt;</em> for synchronized interior mutability.
-  Global State: Use <em>lazy_static</em> or <em>OnceCell</em> for safe initialization of global variables.
-    
-  <strong><em>Sync Trait</em></strong>
+<strong><em>Thread-Safe Alternatives</em></strong>
+For non-thread-safe types, Rust provides thread-safe alternatives:<br>
 
-  A type that implements <em>Sync</em> can safely be shared between threads by reference.
-    For example, if <em>T</em> is <em>Sync</em>, then <em>&T</em> (a shared reference to <em>T</em>) can be accessed by multiple threads simultaneously without issues.
-    This requires that the type guarantees no race conditions or undefined behavior, even when accessed concurrently by multiple threads.<br>
+Instead of <em>Rc&lt;T&gt;</em>: Use <em>Arc&lt;T&gt;</em> for thread-safe reference counting.
+Instead of <em>RefCell&lt;T&gt;</em>: Use <em>Mutex&lt;T&gt;</em> or <em>RwLock&lt;T&gt;</em> for synchronized interior mutability.
+Global State: Use <em>lazy_static</em> or <em>OnceCell</em> for safe initialization of global variables.
 
-  Thread-Safety in Practice<br>
-  Types that implement both <em>Sync</em> and <em>Send</em> are considered thread-safe in Rust. This ensures that the type can be used safely in multi-threaded environments.<br>
-  Example:
+<strong><em>Sync Trait</em></strong>
+
+A type that implements <em>Sync</em> can safely be shared between threads by reference.
+For example, if <em>T</em> is <em>Sync</em>, then <em>&T</em> (a shared reference to <em>T</em>) can be accessed by multiple threads simultaneously without issues.
+This requires that the type guarantees no race conditions or undefined behavior, even when accessed concurrently by multiple threads.<br>
+
+Thread-Safety in Practice<br>
+Types that implement both <em>Sync</em> and <em>Send</em> are considered thread-safe in Rust. This ensures that the type can be used safely in multi-threaded environments.<br>
+Example:
   <pre><code>
   use std::sync::Arc;
   use std::thread;
@@ -1305,11 +1203,11 @@ Types implementing this trait must also be thread-safe and debug-friendly.
   }).join().unwrap();
   </code></pre>
 
-  Why Arc is Sync and Send<br>
-  <em>Arc&lt;T&gt;</em> (Atomic Reference Counted) is a smart pointer in Rust used for shared ownership of a value in a thread-safe manner. It achieves this by using atomic operations to manage its reference count, making it safe for use across multiple threads.<br>
-  How Sync Applies to <em>Arc&lt;T&gt;</em><br>
-  A type T is Sync if it can be safely shared between threads by reference (&T).<br>
-  <em>Arc&lt;T&gt;</em> is Sync because:
+Why Arc is Sync and Send<br>
+<em>Arc&lt;T&gt;</em> (Atomic Reference Counted) is a smart pointer in Rust used for shared ownership of a value in a thread-safe manner. It achieves this by using atomic operations to manage its reference count, making it safe for use across multiple threads.<br>
+How Sync Applies to <em>Arc&lt;T&gt;</em><br>
+A type T is Sync if it can be safely shared between threads by reference (&T).<br>
+<em>Arc&lt;T&gt;</em> is Sync because:
   <ul>
   <li>It ensures atomicity of its reference count updates.</li>
   <li>The underlying data is immutable (by default) or access to it is protected (e.g., using locks like Mutex or RwLock), preventing data races.</li>
@@ -1332,28 +1230,28 @@ Types implementing this trait must also be thread-safe and debug-friendly.
   <summary>More details about <code><strong>Safe to Use Across Unwind Boundaries</strong></code></summary>
 
 
-  <em><strong>Safe to Use Across Unwind Boundaries (RefUnwindSafe and UnwindSafe)</strong></em>
+<em><strong>Safe to Use Across Unwind Boundaries (RefUnwindSafe and UnwindSafe)</strong></em>
 
-  What Are Unwind Boundaries?<br>
-    
-  In Rust, an unwind occurs when a panic happens and the program starts cleaning up by dropping variables and freeing resources.<br>
-  Code that interacts with panics must ensure that resources are safely released and that the program can recover or terminate gracefully.<br>
-    
-  <em><strong>UnwindSafe Trait</strong></em>
-    
-  A type that implements <em>UnwindSafe</em> ensures that it remains in a valid state if a panic occurs while the type is being accessed or used.<br>
-  For example, a struct that only contains primitive types or safe abstractions like <em>String</em> will be <em>UnwindSafe</em>.<br>
-    
-  <em><strong>RefUnwindSafe Trait</strong></em>
-    
-  A type that implements <em>RefUnwindSafe</em> guarantees that it can be safely accessed through a reference (<em>&T</em>) across an unwind boundary.<br>
-  This is a stricter guarantee than <em>UnwindSafe</em> because it deals with shared references.<br>
-    
-  Practical Use of <em>Unwind</em> Safety<br>
-    
-  These traits are mainly used in scenarios where panics can happen but the program intends to recover gracefully, such as in:<br>
-  <em>std::panic::catch_unwind:</em> A function that allows catching panics and continuing execution.
-    
+What Are Unwind Boundaries?<br>
+
+In Rust, an unwind occurs when a panic happens and the program starts cleaning up by dropping variables and freeing resources.<br>
+Code that interacts with panics must ensure that resources are safely released and that the program can recover or terminate gracefully.<br>
+
+<em><strong>UnwindSafe Trait</strong></em>
+
+A type that implements <em>UnwindSafe</em> ensures that it remains in a valid state if a panic occurs while the type is being accessed or used.<br>
+For example, a struct that only contains primitive types or safe abstractions like <em>String</em> will be <em>UnwindSafe</em>.<br>
+
+<em><strong>RefUnwindSafe Trait</strong></em>
+
+A type that implements <em>RefUnwindSafe</em> guarantees that it can be safely accessed through a reference (<em>&T</em>) across an unwind boundary.<br>
+This is a stricter guarantee than <em>UnwindSafe</em> because it deals with shared references.<br>
+
+Practical Use of <em>Unwind</em> Safety<br>
+
+These traits are mainly used in scenarios where panics can happen but the program intends to recover gracefully, such as in:<br>
+<em>std::panic::catch_unwind:</em> A function that allows catching panics and continuing execution.
+
   <pre><code>
   use std::panic;
     
@@ -1382,7 +1280,117 @@ Important for error handling and maintaining program integrity during panics.
 By combining these guarantees, Rust ensures memory safety, thread safety, and robustness in concurrent and error-prone code.
 
 
+
+#### Parquet Writer
+
+In order to be able to write files into parquet I'm using the crates `parquet` and `parquet_derive` as well as extra methods from `project_parquet` defined by us:
+
+in `project_parquet`
+```rust
+use parquet::file::properties::WriterProperties;
+use std::sync::Arc;
+use parquet::file::writer::{ParquetWriter, SerializedFileWriter}; 
+
+pub fn props() -> Arc<WriterProperties> {
+    Arc::new(
+        WriterProperties::builder()
+            .set_compression(parquet::basic::Compression::GZIP)
+            .build(),
+    )
+}
+
+pub trait FileWriterRows {
+    fn total_num_rows(&mut self) -> &i64;
+}
+
+impl<W: 'static + ParquetWriter> FileWriterRows for SerializedFileWriter<W> {
+    fn total_num_rows(&mut self) -> &i64 {
+        &50
+        // &self.total_num_rows
+    }
+}
+
+pub mod prelude {
+
+    pub use super::props;
+    pub use super::FileWriterRows;
+    pub use parquet::file::properties::WriterProperties;
+    pub use parquet::file::writer::{FileWriter, SerializedFileWriter};
+    pub use parquet::record::RecordWriter;
+
+}
+```
+Where:
+
+`WriterProperties` – Provides configuration settings for Parquet file writing (e.g., compression).
+
+`Arc` – A thread-safe reference-counting pointer to allow shared ownership across threads.
+
+`ParquetWriter` & `SerializedFileWriter` – Handle the writing of data to Parquet files.
+The difference between them is that the first defines the interface for writing Parquet(not used directly) and the second implements the interface and writes the file (used directly to write the files).
+
+Function `fn props()`:
+```rust
+pub fn props() -> Arc<WriterProperties> {
+   Arc::new(
+     WriterProperties::builder()
+     .set_compression(parquet::basic::Compression::GZIP)
+     .build(),
+   )
+}
+```
+Creates and returns Parquet writer properties wrapped in an `Arc`, which allows safe sharing across multiple threads.
+`set_compression(parquet::basic::Compression::GZIP)` – Sets the compression type to GZIP for efficient storage.
+
+
+Trait: `FileWriterRows`
+```rust
+pub trait FileWriterRows {
+   fn total_num_rows(&mut self) -> &i64;
+}
+```
+Defines a trait with a method `total_num_rows` that should return a reference to an `i64` (indicating the number of rows written).
+
+Trait Implementation for `SerializedFileWriter`
+
+```rust
+impl<W: 'static + ParquetWriter> FileWriterRows for SerializedFileWriter<W> {
+   fn total_num_rows(&mut self) -> &i64 {
+    // &50
+    &self.total_num_rows
+   }
+}
+```
+Implements the FileWriterRows trait for `SerializedFileWriter<W>`, which is responsible for writing Parquet data to a file.
+The issue: we used to have `&self.total_num_rows` from  `parquet::file::writer::SerializedFileWriter`
+```rust
+pub struct SerializedFileWriter<W: ParquetWriter> {
+    buf: W,
+    schema: TypePtr,
+    descr: SchemaDescPtr,
+    props: WriterPropertiesPtr,
+    total_num_rows: i64,...
+```
+but after another crate update it became a private field so we lost access to it. TODO was to figure it out but at the end we just hardcoded a meaningless number.
+
+Module prelude
+```rust
+pub mod prelude {
+   pub use super::props;
+   pub use super::FileWriterRows;
+   pub use parquet::file::properties::WriterProperties;
+   pub use parquet::file::writer::{FileWriter, SerializedFileWriter};
+   pub use parquet::record::RecordWriter;
+   }
+```
+Provides a convenient way to import commonly used items by simply writing use `project_parquet::prelude::*;`.
+
+We used to define `pub fn parquet_writer<R: RecordWriter<R>>...` in our `project_parquet` but after switching to the newer version of `parquet` there was no need in it.
+
 After the file is written to parquet format it needed to be uploaded to S3 bucket.
+
+## AWS
+
 The logic was described in **_project_aws_** module, which  contains functions that define the AWS SDK provider for connecting to AWS services. It handles tasks such as loading and streaming data to S3, starting AWS Glue jobs, and managing the flow of data through these services.
 When we needed to perform calculations separately, such as using a machine learning model, the module was also responsible for reading data from S3, processing it, and then storing the results back into the Postgres database. This was accomplished by leveraging different versions of the AWS Rust SDK, which evolved over time as better crates became available, allowing us to take advantage of more efficient and feature-rich solutions.
 The overall approach ensured smooth integration with AWS services, allowing us to handle large datasets and computational tasks in a highly scalable and cost-effective manner.
@@ -1405,23 +1413,31 @@ But later switched to these when they become available:
 - aws-smithy-types
 - aws-smithy-runtime-api
 
+
+#### Uploading to S3
+
 Here is the [upload](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-upload_to_s3-rs) function
 
 What happens here:
 ```rust
 pub async fn upload(
-path: PathBuf,
-bucket_name: &str,
-key: &str,
+    path: PathBuf,
+    bucket_name: &str,
+    key: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     ...
 }
 ```
 `async fn`: The function is asynchronous, meaning it will return a future and can be awaited by the caller.
+
 `path: PathBuf`: Takes a `PathBuf`, which is an owned, heap-allocated version of a file path.
+
 `bucket_name: &str`: A reference to the name of the S3 bucket where the file will be uploaded.
+
 `key: &str`: A reference to the key (object name) under which the file will be stored in S3.
+
 `Return Type: Result<(), Box<dyn std::error::Error>>`
+
 If successful, it returns `Ok(())`.
 If an error occurs, it returns a boxed error (dynamic error trait).
 
@@ -1440,6 +1456,7 @@ Reading the file and preparing the request body:
 let body = ByteStream::from_path(Path::new(&path)).await;
 ```
 `ByteStream::from_path(Path::new(&path))` asynchronously reads the file from the given path and creates a byte stream compatible with AWS SDK S3.
+
 `.await` waits for the operation to complete and assigns the resulting byte stream to body.
 
 Loading AWS S3 configuration:
@@ -1448,7 +1465,9 @@ Loading AWS S3 configuration:
 let config = aws_config::from_env().region(REGION).load().await;
 ```
 `aws_config::from_env()`: Loads AWS credentials and configuration (such as access keys, regions) from environment variables.
+
 `.region(REGION)`: Specifies the AWS region to use.
+
 `.load().await`: Asynchronously loads the configuration.
 
 Creating an S3 client:
@@ -1462,18 +1481,22 @@ Uploading the file to S3:
 
 ```rust
 let _ = client
-.put_object()
-.bucket(bucket_name)
-.key(key)
-.body(body.unwrap())
-.send()
-.await;
+    .put_object()
+    .bucket(bucket_name)
+    .key(key)
+    .body(body.unwrap())
+    .send()
+    .await;
 ```
 `client.put_object()`: Creates a new S3 upload request.
+
 `.bucket(bucket_name)`: Specifies the S3 bucket.
+
 `.key(key)`: Specifies the key (filename) under which the object is stored.
-`.body(body.unwrap())`: Provides the file content as the body (using unwrap() to handle potential errors).
-.send().await`: Sends the upload request asynchronously.
+
+`.body(body.unwrap())`: Provides the file content as the body (using `unwrap()` to handle potential errors).
+
+`.send().await`: Sends the upload request asynchronously.
 
 Logging the uploaded file:
 ```rust
@@ -1484,9 +1507,6 @@ Logs the success message using the info! macro.
 Returning success: `Ok(())`
 
 
-
-
-
 We also used to have
 
 ```rust
@@ -1494,6 +1514,8 @@ let credentials_provider = DefaultCredentialsProvider::new().map_err(Box::new)?
 ```
 
 but later switched to `aws_config`
+
+#### Crawler
 
 After uploading file to S3 we had to [crawl](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_crawler-rs) it with the Glue crawler, but initially had to create the function which would create crawler if it didn't exist.
 
@@ -1504,17 +1526,20 @@ What does this function do?
 - If the crawler does not exist, it creates a new crawler targeting an S3 path.
 - Logs success or failure.
 
-  1. Function Signature:
+Function Signature:
 ```rust
-  pub async fn create_crawler(
-     crawler_name: String,
-     path: String,
-     _greedy: bool,
-  ) -> Result<(), Box<dyn std::error::Error>>
+pub async fn create_crawler(
+  crawler_name: String,
+  path: String,
+  _greedy: bool,
+) -> Result<(), Box<dyn std::error::Error>>
 ```
 `crawler_name: String` – The name of the crawler to be created.
+
 `path: String` – The S3 path where the data is stored.
+
 `_greedy: bool` – A boolean parameter (unused in the function now, but it may indicate whether to run the crawler aggressively).
+
 When `greedy: true` in the crawler configuration, it attempts to discover and catalog as much data as possible within a single run.
 
 `Return Type: Result<(), Box<dyn std::error::Error>>`
@@ -1527,9 +1552,11 @@ let _crawler_targets = path.clone();
 let iam_role = "arn:aws:iam::id:role/service-role/AWSGlueServiceRole-role".to_string();
 let config = aws_config::from_env().region(REGION).load().await;
 ```
-`IAM Role`: The function sets up an IAM role ARN for AWS Glue to access data sources.
-`AWS Configuration:` It loads the AWS configuration (such as credentials, region) from environment variables asynchronously.
-Path Cloning: The `path.clone()` is used to avoid modifying the original string.
+    `IAM Role`: The function sets up an IAM role ARN for AWS Glue to access data sources.
+    
+    `AWS Configuration:` It loads the AWS configuration (such as credentials, region) from environment variables asynchronously.
+    
+    Path Cloning: The `path.clone()` is used to avoid modifying the original string.
 
 3. Creating AWS Glue Client:
 ```rust
@@ -1538,78 +1565,82 @@ let glue = Client::new(&config);
 ```
 AWS SDK Glue Client: The function initializes the AWS Glue client using the loaded configuration.
 
-4. Checking if Crawler Exists:
+4. Checking if crawler exists:
 ```rust
-let get_crawler = glue
-   .get_crawler()
-   .name(crawler_name.clone())
-   .send()
-   .await
-   .unwrap();
+    let get_crawler = glue
+        .get_crawler()
+        .name(crawler_name.clone())
+        .send()
+        .await
+        .unwrap();
 ```
 It calls AWS Glue to check if a crawler with the given crawler_name already exists.
 The `.unwrap()` will panic if the request fails. As an improvement I think it's better for error handling to replace it with `?`.
 
-6. Determining if Crawler Should Be Created:
+6. Determining if crawler should be created:
 ```rust
-let must_create = match get_crawler {
-   GetCrawlerOutput {
-   crawler: Some(Crawler { name, .. }),
-   ..
-   } => match name {
-   Some(_crawler_name) => false,
-   _ => panic!("nothing here"),
-   },
-   _ => true,
-   };
+    let must_create = match get_crawler {
+        GetCrawlerOutput {
+            crawler: Some(Crawler { name, .. }),
+            ..
+       } => match name {
+            Some(_crawler_name) => false,
+            _ => panic!("nothing here"),
+       },
+            _ => true,
+       };
 ```
 This pattern-matching block checks the AWS response:
 - If the crawler exists (`Some(Crawler { name, .. })`), it returns false, meaning creation is not needed.
-- If the crawler does not exist (`_` case), it sets must_create to true, meaning a new crawler should be created.
+- If the crawler does not exist (`_` case), it sets `must_create` to true, meaning a new crawler should be created.
 - If the name field is not found, it panics with `"nothing here"`, which is not a proper error handling but was working for years.
 It should be changed to 
 ```rust
-None => {
-   eprintln!("Error: Crawler name not found in the response.");
-   return Err("Crawler name missing".into());
-}
+    None => {
+        eprintln!("Error: Crawler name not found in the response."); 
+        return Err("Crawler name missing".into());
+    }
 ```
 or change the logic to using some default values like
 ```rust
-let must_create = match name {
-    Some(_crawler_name) => false,
-    None => {
-        println!("Using default behavior since crawler name is missing.");
-        true
-    }
-};
+    let must_create = match name {
+        Some(_crawler_name) => false, 
+        None => {
+            println!("Using default behavior since crawler name is missing.");
+            true
+        }
+    };
 ```
 6. Creating the Crawler If Needed:
 ```rust
-if must_create {
-   let create_crawler = glue
-   .create_crawler()
-   .name(crawler_name.clone())
-   .database_name("database_name".to_string())
-   .role(iam_role)
-   .targets(
-   CrawlerTargets::builder()
-   .s3_targets(S3Target::builder().path(path).build())
-   .build(),
-   )
-   .send()
-   .await;
-   info!("create crawler success {:?}", create_crawler.unwrap())
-   } else {
-   info!("crawler already exists")
-   }
+    if must_create {
+        let create_crawler = glue
+           .create_crawler()
+           .name(crawler_name.clone())
+           .database_name("database_name".to_string())
+           .role(iam_role)
+           .targets(
+           CrawlerTargets::builder()
+               .s3_targets(S3Target::builder().path(path).build())
+               .build(),
+            )
+           .send()
+           .await;
+           info!("create crawler success {:?}", create_crawler.unwrap())
+    } else {
+            info!("crawler already exists")
+    }
 ```
 
 It builds an AWS Glue crawler with:
 `.name(crawler_name)`: The provided crawler name.
+
 `.database_name("database_name".to_string())`: The target AWS Glue database.
+
 `.role(iam_role)`: The IAM role ARN for Glue to assume.
+
 `.targets(...)`: Specifies S3 as the data source (provided path).
+
 Sends the create request and logs the success.
 Uses `.unwrap()` on the response, which may panic if there's an error.
 
@@ -1631,11 +1662,12 @@ What it does:
 
 ```rust
 pub async fn start_crawler(
-crawler_name: String,
-poll_to_completion: bool,
+    crawler_name: String,
+    poll_to_completion: bool,
 ) -> Result<(), Box<dyn std::error::Error>>
 ```
 `crawler_name: String` – The name of the crawler to start.
+
 `poll_to_completion: bool` – A flag to determine if the function should wait for the crawler to complete its job or exit immediately.
 
 Return Type:
@@ -1655,8 +1687,8 @@ Retry Loop (Handling Failures):
 ```rust
 let mut attempts = 0;
 loop {
-let start_crawler = glue.start_crawler().name(crawler_name.clone()).send().await;
-attempts += 1;
+    let start_crawler = glue.start_crawler().name(crawler_name.clone()).send().await;
+    attempts += 1;
 ```
 
 The function attempts to start the crawler in a loop and keeps track of how many attempts have been made using attempts, handling the responses in the different ways:
@@ -1664,8 +1696,8 @@ The function attempts to start the crawler in a loop and keeps track of how many
 ```rust
 match start_crawler {
     Ok(_) => {
-    println!("crawling away on {}", crawler_name);
-    break;
+        println!("crawling away on {}", crawler_name);
+        break;
 }
 ```
 If the crawler starts successfully `(Ok(_))`, it prints a message and exits the loop.
@@ -1697,6 +1729,7 @@ StartCrawlerError::CrawlerRunningException(_) => {
 }
 ```
 If `poll_to_completion` is false, it exits immediately.
+
 If `poll_to_completion` is true, it retries up to 20 times with a delay.
 
 `EntityNotFoundException` (crawler doesn't exist):
@@ -1744,8 +1777,7 @@ If `poll_to_completion` is true, it calls `wait_for_crawler()` to continuously c
 Function Completion: `Ok(())`
 Once the crawler starts (or fails gracefully), the function returns Ok(()).
 Looking backwards I think it would be better to replace `std::thread::sleep` with `tokio::time::sleep(DELAY_TIME).await`, because the function is `async`, using `std::thread::sleep` may block the async runtime.
-It would happen as:
-When I call `std::thread::sleep`, it blocks the entire OS thread, meaning that:
+It would happen as when I call `std::thread::sleep`, it blocks the entire OS thread, meaning that:
 
 - The runtime cannot schedule other tasks on that thread while it's sleeping.
 - This can cause a significant slowdown, especially if the number of available worker threads is limited.
@@ -2022,6 +2054,8 @@ Requires specific hardware setups like RTOS or bare-metal.<br>
 </details>
 
 
+## Executing the program
+
 Now we came to the point -how to call the tasks, aws functions etc?
 For that we have directory `procject_cli` with `lib.rs` and `main.rs` files, which are structured to define and run data processing tasks related to handling Postgres data, processing it, and uploading the results to AWS S3:
 
@@ -2072,8 +2106,8 @@ Task Management:
 ```rust
 fn tasks_list() -> Vec<(&'static str, Box<dyn ProjectTask>)> {
     let tasks: Vec<(&str, Box<dyn ProjectTask>)> = vec![
-    ("combined_orders", Box::new(project_tasks::tasks::CombinedOrderTask {})),
-    ....
+        ("combined_orders", Box::new(project_tasks::tasks::CombinedOrderTask {})),
+        ....
     ];
     tasks
 }
@@ -2105,15 +2139,22 @@ Task Execution Loop:
 for (name, task) in tasks {
     println!("{:?} task ", name);
     let result = panic::catch_unwind(|| {
-    let project_result = task.run(
-        utf8_percent_encode(args.arg_POSTGRES_URI.as_str(), DEFAULT_ENCODE_SET)
-        .to_string()
-        .as_str(),
-        );
+        let project_result = task.run(
+            utf8_percent_encode(args.arg_POSTGRES_URI.as_str(), DEFAULT_ENCODE_SET)
+            .to_string()
+            .as_str(),
+            );
     });
 }
 ```
+and here we see the use of implementation of `ProjectTask`
+```rust
+fn run(&self, postgres_uri: &str) -> (String, i64) {
+    orders(postgres_uri)
+}
+```
 Each task is run inside a `panic::catch_unwind()` to prevent crashes from propagating.
+
 
 S3 Upload Handling:
 ```rust
@@ -2124,6 +2165,15 @@ tokio::task::spawn(async move {
 });
 ```
 Files are uploaded asynchronously to AWS S3.
+Here:
+`tokio::task::spawn` is used to spawn a new asynchronous task on the Tokio runtime, the task runs concurrently with other tasks, allowing non-blocking execution of asynchronous code.
+Returns: a `JoinHandle` that can be used to await the result of the task or cancel it.
+
+`async move { ... }` defines an asynchronous block that will be executed by the spawned task. The `move` is used to transfer ownership of variables from the outer scope into the async block. This is necessary because the task might outlive the scope in which it was created.
+It captures variables: `project_file`, `BASE_PATH`, and `path` which are moved into the async block.
+
+`.await` is used to asynchronously wait for the upload function to complete. It yields control back to the Tokio runtime, allowing other tasks to run while waiting for the result.
+If the upload function succeeds, it returns a result. If it fails, it returns an error.
 
 Error Handling:
 If a task fails, it's logged and reported to Sentry:
@@ -2163,6 +2213,14 @@ Thread Pool Setup:
     .unwrap();
 ```
 Uses the Rayon library to enable parallel processing of tasks.
+We are changing number of threads, so we use `build_global`
+
+as docs say
+```rust
+Calling build_global is not recommended, except in two scenarios:
+- You wish to change the default configuration.
+- You are running a benchmark, in which case initializing may yield slightly more consistent results, since the worker threads will already be ready to go even in the first iteration. But this cost is minimal.
+```
 
 Conditionally Running Tasks Based on `flag_table`:
 
@@ -2173,80 +2231,68 @@ if args.flag_table == "all" {
     let (_size, count) = all(args.flag_table);
     
     create_crawler(CRAWLER_NAME.to_string(), s3_path, true)
-    .await
-    .expect("create crawler");
+        .await
+        .expect("create crawler");
     start_crawler(CRAWLER_NAME.to_string(), true)
-    .await
-    .expect("start crawler");
+        .await
+        .expect("start crawler");
 
 } else if args.flag_table == "stream_tasks" {
     let (_size, count) = stream_tasks().await;
     
-    create_crawler(CRAWLER_NAME_ONE.to_string(), s3_path, true)
-    .await
-    .expect("create crawler");
-    start_crawler(CRAWLER_NAME_ONE.to_string(), true)
-    .await
-    .expect("start crawler");
+    create_crawler(CRAWLER_NAME.to_string(), s3_path, true)
+        .await
+        .expect("create crawler");
+    start_crawler(CRAWLER_NAME.to_string(), true)
+        .await
+        .expect("start crawler");
 }
 ```
 
 
+## Summary
 
+### Pros of This ETL Approach
 
-[//]: # (####  Query:)
-
-[//]: # ()
-[//]: # (Using AWS Glue, I crawled the Parquet files to make them queryable. Athena was then used to query the data efficiently.)
-
-
-## Pros of This ETL Approach
-
-Improved Security:
-
+_**Improved Security:**_
 
 Direct access to Postgres was eliminated. Only the ETL program had read access, improving security.
 
-Performance Isolation:
-
+**_Performance Isolation:_**
 
 The heavy computations were offloaded to the Rust program, so the Postgres instance could focus on serving transactional queries.
 
-Cost Efficiency:
-
+**_Cost Efficiency:_**
 
 Parquet files on S3 are cheap to store and efficient to query. Scaling Postgres was no longer necessary for ETL workloads.
 
-Type Safety:
-
+**_Type Safety:_**
 
 Using Rust structs ensured type safety, reducing errors in transformations.
 
-Ease of Querying:
-
+**_Ease of Querying:_**
 
 By integrating with AWS Glue and Athena, I could query enriched data using SQL without additional infrastructure.
 
-A lot of Rust learning :) 
+And one of the most important con: a lot of Rust learning :) 
+For me personally writing Rust code is very satisfying as it requires to know what exactly I want to do, and what exactly I want to receive as the result.
+
 
 ### Cons of This Approach
 
-#### Additional Infrastructure:
-
+_**Additional Infrastructure:**_
 
 Maintaining the Rust program, S3 buckets, and Glue crawlers adds complexity.
 
-#### Latency:
-
+**_Latency:**_
 
 Data in Athena is only as fresh as the last ETL run, so it may not be suitable for real-time use cases.
 
-#### Initial Setup:
-
+**_Initial Setup:_**
 
 Writing and testing the Rust ETL pipeline required a significant upfront effort.
 
-#### Conclusion
+**_Conclusion_**
 
 By moving ETL workloads to a Rust-based pipeline, I was able to address security concerns, reduce operational complexity, and optimize costs. Postgres remained focused on its core transactional role, while combined data was efficiently stored and queried using modern tools like S3 and Athena.
 
