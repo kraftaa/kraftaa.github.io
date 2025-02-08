@@ -5,8 +5,6 @@ date: 2024-12-17
 img: rust3.png
 tags: [Rust, AWS, S3, Postgres]
 ---
-_Work in progress_
-&nbsp;
 
 ## Table of Contents
 - [Problem](#problem)
