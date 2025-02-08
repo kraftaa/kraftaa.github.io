@@ -30,17 +30,6 @@ jobs:
           bundle install
         working-directory: ${{ github.workspace }}
 
-      - name: Check _site contents
-        run: |
-          echo "Checking if _site exists..."
-          if [ -d "_site" ]; then
-            echo "_site exists! Listing contents:"
-            ls -la _site
-          else
-            echo "⚠️ _site directory is missing! Jekyll build may have failed."
-            exit 1  # Fails the workflow if _site is missing
-          fi
-
       - name: Build the Jekyll site
         run: bundle exec jekyll build --trace
         working-directory: ${{ github.workspace }}
