@@ -186,13 +186,23 @@ The _**diesel_ext**_ crate then was used to generate the Rust struct for that ta
 I created also a [_**template_task**_](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-template_task-rs) which was a blue-print for most tasks and used the _sed_ command to customize tasks' files, creating a corresponding task in the project.
 
 
-Here’s the [**Makefile**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_model-rs)  command that does all of this.
+Here’s the [**Makefile**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_model-rs)  that does all of this.
 
 This approach saved considerable time and streamlined the process, reduced the chance of errors with types/nullables by automating the mapping process.
 
 Now I would rather put everything into combined bash script which would run over the predefined list of tables and create _table!_ macro definition and a corresponding struct with a task, but the existing approach worked well for years and I won't change it, as its life is coming to the end due to change in the infrastructure.
 Here’s an example of some Postgres tables, corresponding structs and the task combining all of them with extra calculations:
 
+The table and struct definitions were organized within the _**project_schemas**_ directory. This directory included the tables and models subdirectories, each housing the respective definitions. Additionally, a **_mod.rs_** file was used to list and manage all the tables and models for easier access and modularity.
+
+```shell
+project_schemas
+└── src
+   ├── tables
+   ├── models
+   └── lib.rs
+└── Cargo.toml
+```
 
 For instance, assume we had several postgres tables:
 
@@ -257,35 +267,6 @@ where:
 `Queryable:` This is a procedural macro from **diesel**. It automatically generates the necessary code to allow the struct to be used for querying data from the database. It means the **_Order_** struct can be used in diesel queries to map results from the database into instances of the struct.
 
 `Debug:` This is another procedural macro, provided by Rust standard library. It automatically generates code to allow the struct to be printed in a human-readable form using `println!("{:?}", ...)`. It makes it easy to debug and print the struct in logs or console output.
-
-The table and struct definitions were organized within the _**project_schemas**_ directory. This directory included the tables and models subdirectories, each housing the respective definitions. Additionally, a **_mod.rs_** file was used to list and manage all the tables and models for easier access and modularity.
-
-```shell
-project_schemas
-└── src
-   ├── tables
-   ├── models
-   └── lib.rs
-└── Cargo.toml
-```
-
-[//]: # (<div class="mermaid">)
-
-[//]: # (graph TD)
-
-[//]: # (A[project_schemas])
-
-[//]: # (A --> B[src])
-
-[//]: # (B --> C[tables])
-
-[//]: # (B --> D[models])
-
-[//]: # (B --> E[lib.rs])
-
-[//]: # (A --> F[Cargo.toml])
-
-[//]: # (</div>)
 
 
 #### Tasks
@@ -815,7 +796,7 @@ To handle that some tasks were recreated using **_sqlx_** crate, which was used 
 
 Why use **_sqlx_** instead of diesel for large tables?
 
-**Asynchronous Database Access (Key Advantage):** 
+**Asynchronous Database Access:** 
 
 - **_sqlx_** provides **_async_**/**_await_** support, which allows for non-blocking database operations.
 This is crucial for handling large datasets, as it enables efficient streaming and processing without blocking the main thread, improving throughput and scalability.
@@ -900,17 +881,12 @@ So for each extra filter value in **Diesel** I need to write extra code, when fo
 - Flexibility with Input: Supports building queries based on user-provided filters without writing multiple query versions.
 - No Compile-Time Schema Enforcement(very important if I want to check what I'm getting): Unlike Diesel, sqlx allows running ad-hoc queries without defining schema structs.
 
-For **_sqlx_**  `mod.rs` I have traits `ProjectStreamTask` and `HugeStreamTask`  which define an interface to run asynchronous tasks that interact with PostgreSQL and return results.
-They enforce that implementing structs must be `Send + Sync + Debug + UnwindSafe`, ensuring thread safety and error resilience.
+For **_sqlx_**  `mod.rs` I have a trait `ProjectStreamTask`  which defines an interface to run asynchronous tasks that interact with PostgreSQL and return results.
+It enforces that implementing structs must be `Send + Sync + Debug + UnwindSafe`, ensuring thread safety and error resilience.
 ```rust
 #[async_trait]
 pub trait ProjectStreamTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
     async fn run(&self, postgres_uri: &str) -> (String, i64);
-}
-
-#[async_trait]
-pub trait HugeStreamTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
-    async fn run(&self, postgres_uri: &str) -> Vec<(NaiveDate, PathBuf, u128, i64)>;
 }
 ```
 In the [**streaming_task.rs**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-streaming_task-rs) the `ProductRecordStream` struct, derived with `ParquetRecordWriter` and `sqlx::FromRow`, and `Default` and `Debug` which provide automatic implementations of functionalities that help with extracting struct field names, fetching data from Postgres and writing it to Parquet files.
@@ -930,11 +906,11 @@ let result = sqlx::query_as::<sqlx::Postgres, ProductRecordStream>(&query).fetch
 When the `Default` trait is derived, Rust will automatically generate an implementation for it that initializes all struct fields with their respective default values.
 Default values for standard types in Rust:
 ```rust
-i64 → 0
-Option<T> → None
-String → "" (empty string)
-Vec<T> → empty vector vec![]
-bool → false
+i64 -> 0
+Option<T> -> None
+String -> "" (empty string)
+Vec<T> -> empty vector vec![]
+bool -> false
 ..
 ```
 
@@ -963,7 +939,7 @@ Creating a default instance (`..Default::default()`) allows access to the schema
 Since the struct fields represent database columns, creating an instance helps dynamically determine column names required for query building.
 Without this, I would need to hard-code column names (like in the 'normal' tasks described above), which reduces flexibility.
 
-The obvious advantages:
+The advantages:
 - If the struct definition changes (e.g., new fields are added), the introspection ensures that the SQL query automatically adapts, avoiding manual updates.
 - the program avoids errors as without creating an instance, trying to access field names programmatically would lead to compilation errors because Rust’s type system doesn't allow reflection like dynamically typed languages.
 
@@ -978,12 +954,13 @@ The code extracts schema details from the sample data.
 
 `schema_vec = schema_2.get_fields();` gets a list of fields (columns) for further processing.
 
-Why do I need both `schema` and `schema_2`? Because of Rust ownership rules we can have all different kinds of errors while trying to use some variable which we don't own anymore.
+Why do I need both `schema` and `schema_2`? Because of Rust ownership rules we can have all different kinds of errors while trying to use some variable which we don't own anymore or trying to move while they are still in use.
 
 later in the function I have:
 ```rust
 for i in schema_vec {
-... .
+...  
+    fields.push("type as type_")
 }
 let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
 let fields: &str = &fields.join(", ");
@@ -1034,14 +1011,10 @@ I can Not do `SerializedFileWriter::new(file, &schema, props())` because `Serial
 If I do `let schema_vec = &schema.get_fields();` then I get 
 ```rust
 36 |     for i in schema_vec {
-   |              ^^^^^^^^^^ `&&[std::sync::Arc<dracula_parquet::prelude::parquet::schema::types::Type>]` is not an iterator
-   |
-   = help: the trait `std::iter::Iterator` is not implemented for `&&[std::sync::Arc<dracula_parquet::prelude::parquet::schema::types::Type>]`
-   = note: required for `&&[std::sync::Arc<dracula_parquet::prelude::parquet::schema::types::Type>]` to implement `std::iter::IntoIterator`
-
+   |              ^^^^^^^^^^ `&&[std::sync::Arc<project_parquet::prelude::parquet::schema::types::Type>]` is not an iterator
 ```
 
-If I try to clone my vector `let schema = fake_products.clone().as_slice().schema().unwrap();` I'd get an error about trait `Copy` not being satisfied and if I add `#[derive(Clone)]` to my struct I'd get the same error about `borrow of `schema``.
+If I try to clone my vector `let schema = fake_products.clone().as_slice().schema().unwrap();` I'd get an error about trait `Copy` not being satisfied and if I add `#[derive(Clone)]` to my struct I'd get the same error about `borrow of `schema`.
 
 If I do `let schema_vec = schema.clone().get_fields();` I'd get 
 ```rust
@@ -1088,7 +1061,6 @@ let path = "/tmp/products.parquet";
 let file = std::fs::File::create(&path).unwrap();
 let mut pfile = SerializedFileWriter::new(file, schema, props()).unwrap();
 ```
-`Instant::now()` tracks how long the operation takes.
 A Parquet file path is defined as `"/tmp/products.parquet"`.
 The file is created using `std::fs::File::create(path)`.
 A Parquet writer (`SerializedFileWriter`) is initialized with the schema and file properties.
@@ -1105,15 +1077,14 @@ query.push_str(table);
 ```
 A `SELECT` query is dynamically built by concatenating the extracted field names and appending the table name (`products`).
 
-Query Execution with SQLX (`query_as`): Executes the SQL query asynchronously and streams results.
+Query execution with SQLX (`query_as`): executes the SQL query asynchronously and streams results.
 
 ```rust
 let result = sqlx::query_as::<sqlx::Postgres, ProductRecordStream>(&query);
 let product_stream = result.fetch(&pool);
 ```
 
-
-Processing Data in Chunks (5000 rows at a time): Streams rows from the database and writes them to a Parquet file in chunks.
+Processing data in chunks (5000 rows at a time): streams rows from the database and writes them to a parquet file in chunks.
 ```rust
 let mut chunk_stream = products_stream.map(|fs| fs.unwrap()).chunks(5000);
 while let Some(chunks) = chunk_stream.next().await {
@@ -1124,7 +1095,7 @@ while let Some(chunks) = chunk_stream.next().await {
     pfile.close_row_group(row_group).unwrap();
 }
 ```
-Trait Implementation (`ProductStreamingTask`): implements the trait to run the task that fetches data and stores it.
+Trait implementation (`ProductStreamingTask`): implements the trait to run the task that fetches data and stores it.
 ```rust
 use async_trait::async_trait;
 #[derive(Debug)]
@@ -1137,23 +1108,11 @@ impl ProjectStreamTask for ProductStreamTask {
 }
 ```
 
-[//]: # (<details>)
-
-[//]: # (	<summary>Click to expand</summary>)
-
-[//]: # (	<pre>)
-
-[//]: # (	Long content here)
-
-[//]: # (	</pre>)
-
-[//]: # (</details>)
-
-
 Similar to `ProjectTask`, this defines a trait for asynchronous tasks.
 The `#[async_trait]` attribute allows the run function to be an `async fn`, enabling asynchronous operations within the trait implementation.
 It's  designed for streaming tasks that may involve asynchronous operations, such as reading data from a database, processing it, and returning results.
-Types implementing this trait must also be thread-safe and debug-friendly.
+Types implementing this trait must also be thread-safe and debug-friendly (as shown above for `pub trait ProjectStreamTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
+`). What does it mean in Rust?
 
 #### Thread Safety in Rust
 
@@ -1165,8 +1124,8 @@ _**Send**_: A type that implements **Send** can be safely transferred between th
 
 Non-thread-safe Resources and what to use instead:
 
-**Rc\<T\>** is not thread-safe, use **Arc\<T\>** for thread-safe reference counting.
-**RefCell\<T\>** is not thread-safe, use **Mutex\<T\>** or **RwLock\<T\>** for synchronized interior mutability.
+**Rc\<T\>** is not thread-safe, we need use **Arc\<T\>** for thread-safe reference counting.
+**RefCell\<T\>** is not thread-safe, we need use **Mutex\<T\>** or **RwLock\<T\>** for synchronized interior mutability.
 
 **_Sync_**: A type that implements **Sync** can be safely shared by reference (**&T**) across multiple threads. It guarantees no race conditions or undefined behavior during concurrent access.
 
@@ -1175,7 +1134,7 @@ Thread-Safe Alternatives:
 Use **Arc\<T\>** instead of **Rc\<T\>** for shared ownership in multi-threaded contexts.
 Use **Mutex\<T\>** or **RwLock\<T\>** instead of **RefCell\<T\>** for thread-safe interior mutability.
 
-Sync and Send in Practice:
+Sync and Send example:
 
 A type that implements both Sync and Send can be safely shared and moved between threads.
 Example: **Arc\<T\>** is both **Sync** (can be shared by reference) and **Send** (can be transferred between threads).
@@ -1232,21 +1191,24 @@ For example, a struct that only contains primitive types or safe abstractions li
 A type that implements RefUnwindSafe guarantees that it can be safely accessed through a reference (&T) across an unwind boundary.
 This is a stricter guarantee than UnwindSafe because it deals with shared references.
 
-Practical Use of Unwind Safety
+Use of Unwind Safety
 
 These traits are mainly used in scenarios where panics can happen but the program intends to recover gracefully, such as in:
-`std::panic::catch_unwind:` A function that allows catching panics and continuing execution.
+`std::panic::catch_unwind:` A function that allows catching panics and continuing execution. It's used in our `project_cli/src/main.rs`
 
 ```rust
   use std::panic;
-    
+
   let result = panic::catch_unwind(|| {
-    println!("Before panic");
-    panic!("Oops!");
-  });
+      let project_result = task.run(
+        ....
+      });
   match result {
     Ok(_) => println!("Code ran successfully"),
-    Err(_) => println!("Caught a panic"),
+    Err(_) => {
+        let message = format!("Project got panic! in {} file", name);
+        sentry::capture_message(message.as_str(), sentry::Level::Warning);
+    },
   }
 ```
 
@@ -1261,7 +1223,6 @@ Important for concurrent or parallel processing.
 
 Ensures a type can be safely accessed or manipulated across panic boundaries.
 Important for error handling and maintaining program integrity during panics.
-By combining these guarantees, Rust ensures memory safety, thread safety, and robustness in concurrent and error-prone code.
 
 
 #### Parquet Writer
@@ -1912,7 +1873,7 @@ Error Handling:
 If a task fails, it's logged and reported to Sentry:
 ```rust
 if result.is_err() {
-    let message = format!("project GOT Panic! in {} file", name);
+    let message = format!("project got panic! in {} file", name);
     sentry::capture_message(message.as_str(), sentry::Level::Warning);
 }
 ```
@@ -2065,7 +2026,7 @@ Using Rust structs ensured type safety, reducing errors in transformations.
 
 By integrating with AWS Glue and Athena, I could query enriched data using SQL without additional infrastructure.
 
-And one of the most important pros: a lot of Rust learning :) 
+And one of the most important pros: a lot of Rust learning :books:
 For me personally writing Rust code is very satisfying as it requires to know what exactly I want to do, and what exactly I want to receive as the result.
 
 
