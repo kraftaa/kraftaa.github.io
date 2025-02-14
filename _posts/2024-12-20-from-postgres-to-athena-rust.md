@@ -15,6 +15,9 @@ tags: [Rust, AWS, S3, Postgres]
       - [Schema](#schema)
       - [Tasks](#tasks)
       - [Streaming Tasks](#streaming-tasks)
+      - [Thread Safety in Rust](#thread-safety-in-rust)
+      - [RefUnwindSafe and UnwindSafe in Rust](#refunwindsafe-and-unwindsafe-in-rust)
+      - [Streaming Tasks](#streaming-tasks)
       - [Parquet Writer](#parquet-writer)
     - [AWS](#aws)
       -  [Uploading to S3](#uploading-to-s3)
@@ -1134,152 +1137,107 @@ impl ProjectStreamTask for ProductStreamTask {
 }
 ```
 
+[//]: # (<details>)
+
+[//]: # (	<summary>Click to expand</summary>)
+
+[//]: # (	<pre>)
+
+[//]: # (	Long content here)
+
+[//]: # (	</pre>)
+
+[//]: # (</details>)
+
 
 Similar to `ProjectTask`, this defines a trait for asynchronous tasks.
 The `#[async_trait]` attribute allows the run function to be an `async fn`, enabling asynchronous operations within the trait implementation.
 It's  designed for streaming tasks that may involve asynchronous operations, such as reading data from a database, processing it, and returning results.
 Types implementing this trait must also be thread-safe and debug-friendly.
 
-<details>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script>hljs.highlightAll();</script>
-  <summary>More details about <code><strong>Thread-Safe</strong></code> (Sync and Send) traits</summary>
+#### Thread Safety in Rust
 
-A type that implements <em>Send</em> can safely be transferred between threads.<br>
-For example, if a type is <em>Send</em>, it can be passed to a thread or moved into a thread pool for parallel execution.<br>
-Most primitive types in <em>Rust</em> (like integers and String) are <em>Send</em> by default. However, types that contain raw pointers or manage non-thread-safe resources might not be.<br>
-(Raw pointers in Rust are <em>*const T</em> (immutable) and <em>*mut T</em> (mutable). These are low-level constructs that provide direct memory access, similar to pointers in C or C++. Unlike Rust's references (&T and &mut T).<br>
+**Sync and Send Traits**
 
-<code><strong>Raw pointers</strong></code>:<br>
-  <ul>Lack Safety Guarantees:<br>
+_**Send**_: A type that implements **Send** can be safely transferred between threads. Most primitives in Rust (like **integers** and **String**) are **Send** by default, but types with raw pointers or non-thread-safe resources (like **Rc\<T\>**) are not.
 
-  <li>They do not enforce borrow checking, lifetimes, or ownership rules.
-  This means I can create dangling pointers, null pointers, or data races if not handled carefully.</li>
-  <li>Use Cases:</li>
+**Raw Pointers**: Rust's raw pointers (*const T and *mut T) don't have safety guarantees like borrow checking, so they require unsafe code. They are used in low-level tasks like interfacing with C code or optimizing performance.
 
-Raw pointers are typically used in unsafe code for advanced scenarios, such as:<br>
-  <li>Interfacing with C code.</li>
-  <li>Optimizing performance when known that the operations are safe.</li>
-  <li>Implementing custom data structures or memory allocators.</li>
-  </ul>
-  Example:
-  <pre><code class="language-rust">
-    let x = 1;
-    let raw_ptr: *const i32 = &x;
+Non-thread-safe Resources and what to use instead:
 
-    unsafe {
-        println!("Value at raw pointer: {}", *raw_ptr); // Unsafe block is required
+**Rc\<T\>** is not thread-safe, use **Arc\<T\>** for thread-safe reference counting.
+**RefCell\<T\>** is not thread-safe, use **Mutex\<T\>** or **RwLock\<T\>** for synchronized interior mutability.
+
+**_Sync_**: A type that implements **Sync** can be safely shared by reference (**&T**) across multiple threads. It guarantees no race conditions or undefined behavior during concurrent access.
+
+Thread-Safe Alternatives:
+
+Use **Arc\<T\>** instead of **Rc\<T\>** for shared ownership in multi-threaded contexts.
+Use **Mutex\<T\>** or **RwLock\<T\>** instead of **RefCell\<T\>** for thread-safe interior mutability.
+
+Sync and Send in Practice:
+
+A type that implements both Sync and Send can be safely shared and moved between threads.
+Example: **Arc\<T\>** is both **Sync** (can be shared by reference) and **Send** (can be transferred between threads).
+
+```rust
+use std::sync::Arc;
+use std::thread;
+
+let data = Arc::new(vec![1, 2, 3]);
+let data_clone = Arc::clone(&data);
+
+thread::spawn(move || {
+    println!("{:?}", data_clone); // Safe because `Arc` is both `Sync` and `Send`
+}).join().unwrap();
+```
+Not-safe example:
+```rust
+use std::sync::Arc;
+use std::thread;
+
+fn main() {
+    let data = Arc::new(vec![1, 2, 3]);
+
+    for _ in 0..3 {
+        let data_clone = Arc::clone(&data);
+        thread::spawn(move || {
+            // Unsafe mutation of `Arc<Vec<T>>`
+            let mut data_mut = Arc::get_mut(&mut Arc::clone(&data_clone)).unwrap();
+            data_mut.push(4); // Data race. Multiple threads modifying the same Vec<T>
+        });
     }
-</code></pre>
+}
+```
+why it's not safe:
+**Arc\<T\>** provides shared ownership, but it does not allow mutation safely.
+**Arc::get_mut()** only works when there is a single reference. When multiple threads hold a reference, it panics.
+If **data.push(4)** were possible, it could corrupt memory due to simultaneous modifications.
+To avoid this we need to use `let data = Arc::new(Mutex::new(vec![1, 2, 3]));`
 
-<strong><em>Non-Thread-Safe Resources</em></strong>
-<em>Non-thread-safe</em> resources are types or constructs that cannot safely be shared or accessed by multiple threads simultaneously.
-These might include:<br>
+#### RefUnwindSafe and UnwindSafe in Rust
 
-<em>Rc&lt;T&gt;(Reference Counted Smart Pointer)</em><br>
-<em>Rc&lt;T&gt;</em> provides shared ownership of a value but is not thread-safe because it doesn’t use atomic operations to manage the reference count.
-Instead, <em>Arc&lt;T&gt;</em> (atomic reference counter) is used for thread-safe shared ownership.
+What Are Unwind Boundaries?
 
-Example:
-  <pre><code class="language-rust">
-  use std::rc::Rc;
-  let data = Rc::new(42);
-  let cloned = Rc::clone(&data); // Safe in a single-threaded context
-  // Rc is NOT `Send`, so it cannot be shared between threads
-  </code></pre>
+In Rust, an unwind occurs when a panic happens and the program starts cleaning up by dropping variables and freeing resources.
+Code that interacts with panics must ensure that resources are safely released and that the program can recover or terminate gracefully.
 
-<strong><em>Unsafe Data Structures</em></strong>
-Structures that allow direct, uncontrolled access to their internals, like raw pointers or custom synchronization primitives without proper locking mechanisms.<br>
+**UnwindSafe Trait**
 
-Global state:<br>
-Global variables or mutable static variables can lead to data races if accessed without proper synchronization.<br>
-Example of Non-Thread-Safe Code:<br>
-  <pre><code class="language-rust">
-  use std::cell::RefCell;
-  let data = RefCell::new(5);
-  // RefCell is not thread-safe, so this would cause issues in a multi-threaded context
-  *data.borrow_mut() = 10;
-  </code></pre>
+A type that implements UnwindSafe ensures that it remains in a valid state if a panic occurs while the type is being accessed or used.
+For example, a struct that only contains primitive types or safe abstractions like String will be UnwindSafe.
 
-<strong><em>Thread-Safe Alternatives</em></strong>
-For non-thread-safe types, Rust provides thread-safe alternatives:<br>
+**RefUnwindSafe Trait**
 
-Instead of <em>Rc&lt;T&gt;</em>: Use <em>Arc&lt;T&gt;</em> for thread-safe reference counting.
-Instead of <em>RefCell&lt;T&gt;</em>: Use <em>Mutex&lt;T&gt;</em> or <em>RwLock&lt;T&gt;</em> for synchronized interior mutability.
-Global State: Use <em>lazy_static</em> or <em>OnceCell</em> for safe initialization of global variables.
+A type that implements RefUnwindSafe guarantees that it can be safely accessed through a reference (&T) across an unwind boundary.
+This is a stricter guarantee than UnwindSafe because it deals with shared references.
 
-<strong><em>Sync Trait</em></strong>
+Practical Use of Unwind Safety
 
-A type that implements <em>Sync</em> can safely be shared between threads by reference.
-For example, if <em>T</em> is <em>Sync</em>, then <em>&T</em> (a shared reference to <em>T</em>) can be accessed by multiple threads simultaneously without issues.
-This requires that the type guarantees no race conditions or undefined behavior, even when accessed concurrently by multiple threads.<br>
+These traits are mainly used in scenarios where panics can happen but the program intends to recover gracefully, such as in:
+`std::panic::catch_unwind:` A function that allows catching panics and continuing execution.
 
-Thread-Safety in Practice<br>
-Types that implement both <em>Sync</em> and <em>Send</em> are considered thread-safe in Rust. This ensures that the type can be used safely in multi-threaded environments.<br>
-Example:
-  <pre><code>
-  use std::sync::Arc;
-  use std::thread;
-    
-  let data = Arc::new(vec![1, 2, 3]); // `Arc` is thread-safe
-  let data_clone = Arc::clone(&data);
-    
-  thread::spawn(move || {
-    println!("{:?}", data_clone); // Safe because `Arc` is `Sync` and `Send`
-  }).join().unwrap();
-  </code></pre>
-
-Why Arc is Sync and Send<br>
-<em>Arc&lt;T&gt;</em> (Atomic Reference Counted) is a smart pointer in Rust used for shared ownership of a value in a thread-safe manner. It achieves this by using atomic operations to manage its reference count, making it safe for use across multiple threads.<br>
-How Sync Applies to <em>Arc&lt;T&gt;</em><br>
-A type T is Sync if it can be safely shared between threads by reference (&T).<br>
-<em>Arc&lt;T&gt;</em> is Sync because:
-  <ul>
-  <li>It ensures atomicity of its reference count updates.</li>
-  <li>The underlying data is immutable (by default) or access to it is protected (e.g., using locks like Mutex or RwLock), preventing data races.</li>
-  </ul>  
-  How Send Applies to <em>Arc&lt;T&gt;</em>:<br>
-  A type T is Send if it can be safely transferred between threads.<br>
-
-<em>Arc&lt;T&gt;</em> is Send because:<br>
-  <ul>
-  <li>Its internal reference count is updated atomically, so moving it to another thread does not cause unsafe behavior.</li>
-  <li>The ownership of the Arc pointer itself (not the underlying data) is transferred safely.</li>
-  </ul>
-
-</details>
-
-<details>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
-  <script>hljs.highlightAll();</script>
-  <summary>More details about <code><strong>Safe to Use Across Unwind Boundaries</strong></code></summary>
-
-
-<em><strong>Safe to Use Across Unwind Boundaries (RefUnwindSafe and UnwindSafe)</strong></em>
-
-What Are Unwind Boundaries?<br>
-
-In Rust, an unwind occurs when a panic happens and the program starts cleaning up by dropping variables and freeing resources.<br>
-Code that interacts with panics must ensure that resources are safely released and that the program can recover or terminate gracefully.<br>
-
-<em><strong>UnwindSafe Trait</strong></em>
-
-A type that implements <em>UnwindSafe</em> ensures that it remains in a valid state if a panic occurs while the type is being accessed or used.<br>
-For example, a struct that only contains primitive types or safe abstractions like <em>String</em> will be <em>UnwindSafe</em>.<br>
-
-<em><strong>RefUnwindSafe Trait</strong></em>
-
-A type that implements <em>RefUnwindSafe</em> guarantees that it can be safely accessed through a reference (<em>&T</em>) across an unwind boundary.<br>
-This is a stricter guarantee than <em>UnwindSafe</em> because it deals with shared references.<br>
-
-Practical Use of <em>Unwind</em> Safety<br>
-
-These traits are mainly used in scenarios where panics can happen but the program intends to recover gracefully, such as in:<br>
-<em>std::panic::catch_unwind:</em> A function that allows catching panics and continuing execution.
-
-  <pre><code>
+```rust
   use std::panic;
     
   let result = panic::catch_unwind(|| {
@@ -1290,22 +1248,20 @@ These traits are mainly used in scenarios where panics can happen but the progra
     Ok(_) => println!("Code ran successfully"),
     Err(_) => println!("Caught a panic"),
   }
-  </code></pre>
-</details>
+```
 
+**Summary**
 
-<strong>Summary</strong>
-<em><strong>Thread-Safety (Sync and Send)</strong><em>:
+**Thread-Safety (Sync and Send)**:
 
 Ensures a type can be safely transferred (Send) or shared (Sync) between threads without causing race conditions or undefined behavior.
 Important for concurrent or parallel processing.
 
-<em><strong>Unwind Safety (RefUnwindSafe and UnwindSafe)</strong><em>:
+**Unwind Safety (RefUnwindSafe and UnwindSafe)**:
 
 Ensures a type can be safely accessed or manipulated across panic boundaries.
 Important for error handling and maintaining program integrity during panics.
 By combining these guarantees, Rust ensures memory safety, thread safety, and robustness in concurrent and error-prone code.
-
 
 
 #### Parquet Writer
@@ -1823,276 +1779,6 @@ It would happen as when I call `std::thread::sleep`, it blocks the entire OS thr
 
 But if I use `tokio` then it as other async runtimes, uses a thread pool to run tasks concurrently.
 
-[//]: # ()
-[//]: # (While writing this I decided to check what other async runtimes are available in Rust and created a short summary. )
-[//]: # (### Async Runtimes Comparison Summary)
-[//]: # ()
-[//]: # (| Runtime   | Best Use Case               | Key Feature                    | Ecosystem Support |)
-
-[//]: # ()
-[//]: # (|-----------|-----------------------------|--------------------------------|-------------------|)
-
-[//]: # ()
-[//]: # (| **Tokio**  | Web services, microservices  | Multi-threaded, feature-rich   | Excellent         |)
-
-[//]: # ()
-[//]: # (| **async-std** | CLI tools, general async apps | Standard library-like API     | Good              |)
-
-[//]: # ()
-[//]: # (| **smol**   | Lightweight, minimal apps    | Small footprint                | Moderate          |)
-
-[//]: # ()
-[//]: # (| **actix**  | Actor-based web apps         | Built-in actor model           | Great &#40;for web apps&#41; |)
-
-[//]: # ()
-[//]: # (| **bastion**| Fault-tolerant services      | Resilient supervision          | Moderate          |)
-
-[//]: # ()
-[//]: # (| **glommio**| High-performance I/O apps    | NUMA-aware runtime             | Specialized       |)
-[//]: # ()
-[//]: # ()
-[//]: # (| **embassy**| Embedded/IoT devices         | no_std async support           | Specialized       |)
-
-<details>
-  <summary><strong><em>While writing this I decided to check what other async runtimes are available in Rust and created a short summary with the examples</em></strong></summary>
-  <em>Comparison Summary</em>
-  <table>
-  <thead>
-    <tr>
-      <th>Runtime</th>
-      <th>Best Use Case</th>
-      <th>Key Feature</th>
-      <th>Ecosystem Support</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><strong>Tokio</strong></td>
-      <td>Web services, microservices</td>
-      <td>Multi-threaded, feature-rich</td>
-      <td>Excellent</td>
-    </tr>
-    <tr>
-      <td><strong>async-std</strong></td>
-      <td>CLI tools, general async apps</td>
-      <td>Standard library-like API</td>
-      <td>Good</td>
-    </tr>
-    <tr>
-      <td><strong>smol</strong></td>
-      <td>Lightweight, minimal apps</td>
-      <td>Small footprint</td>
-      <td>Moderate</td>
-    </tr>
-    <tr>
-      <td><strong>actix</strong></td>
-      <td>Actor-based web apps</td>
-      <td>Built-in actor model</td>
-      <td>Great (for web apps)</td>
-    </tr>
-    <tr>
-      <td><strong>bastion</strong></td>
-      <td>Fault-tolerant services</td>
-      <td>Resilient supervision</td>
-      <td>Moderate</td>
-    </tr>
-    <tr>
-      <td><strong>glommio</strong></td>
-      <td>High-performance I/O apps</td>
-      <td>NUMA-aware runtime</td>
-      <td>Specialized</td>
-    </tr>
-    <tr>
-      <td><strong>embassy</strong></td>
-      <td>Embedded/IoT devices</td>
-      <td>no_std async support</td>
-      <td>Specialized</td>
-    </tr>
-  </tbody>
-</table>
-
-These examples show implementation of a simple asynchronous HTTP server using different Rust async runtimes. The example will handle incoming requests and respond with a simple message.<br>
-
-
-1. <strong><em>Tokio</em></strong>
-<pre><code class="language-rust">
-use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-#[tokio::main]
-async fn main() {
-let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
-println!("Listening on port 8080...");
-
-    loop {
-        let (mut socket, _) = listener.accept().await.unwrap();
-        tokio::spawn(async move {
-            let mut buffer = [0; 1024];
-            socket.read(&mut buffer).await.unwrap();
-            socket.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from Tokio!").await.unwrap();
-        });
-    }
-}
-</code></pre>
-
-<em>Tokio</em> provides a powerful multi-threaded runtime.
-Best for high-performance web applications.
-Rich ecosystem with support for databases, networking, and concurrency utilities.
-Uses tasks and an I/O driver to handle concurrency efficiently.<br>
-
-2. <strong><em>async-std</em></strong>
-
-<pre><code class="language-rust">
-use async_std::net::TcpListener;
-use async_std::prelude::*;
-
-#[async_std::main]
-async fn main() {
-let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
-println!("Listening on port 8080...");
-
-    while let Some(stream) = listener.incoming().next().await {
-        let mut stream = stream.unwrap();
-        async_std::task::spawn(async move {
-            let mut buffer = vec![0; 1024];
-            stream.read(&mut buffer).await.unwrap();
-            stream.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from async-std!").await.unwrap();
-        });
-    }
-}
-</code></pre>
-<em>async-std</em> provides a standard library API for async programming.
-Best for simpler async applications and CLI tools.
-Has a simpler API compared to Tokio but less optimized for high throughput.
-Built on top of <em>async-io</em>.<br>
-
-3. <strong><em>smol</em></strong>
-<pre><code class="language-rust">
-use smol::net::TcpListener;
-use smol::prelude::*;
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    smol::block_on(async {
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
-    println!("Listening on port 8080...");
-
-        while let Some(stream) = listener.incoming().next().await {
-            let mut stream = stream?;
-            smol::spawn(async move {
-                let mut buffer = vec![0; 1024];
-                stream.read(&mut buffer).await.unwrap();
-                stream.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from Smol!").await.unwrap();
-            }).detach();
-        }
-        Ok(())
-    })
-}
-</code></pre>
-
-<em>Smol</em> is minimal and designed for lightweight applications.
-Great for embedded devices or minimal environments.
-Fewer dependencies compared to <em>Tokio</em> and <em>async-std</em>.
-Uses thread-pool only when necessary.<br>
-
-4. <strong><em>Actix</em></strong>
-<pre><code class="language-rust">
-use actix_web::{web, App, HttpServer, Responder};
-
-async fn hello() -> impl Responder {
-    "Hello from Actix!"
-}
-
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    HttpServer::new(|| App::new().route("/", web::get().to(hello)))
-        .bind("127.0.0.1:8080")?
-        .run()
-        .await
-    }
-</code></pre>
-
-<em>Actix</em> is actor-based and well-suited for highly concurrent web apps.
-Excellent performance in handling web requests compared to other runtimes.
-Built on Tokio but provides an abstraction layer with actors for better concurrency.
-Has built-in middleware support for web development.<br>
-
-5. <strong><em>Bastion</em></strong>
-<pre><code class="language-rust">
-use bastion::prelude::*;
-use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-
-#[tokio::main]
-async fn main() {
-Bastion::init();
-Bastion::start();
-
-    let _ = Bastion::supervisor(|sp| {
-        sp.children(|ch| {
-            ch.with_exec(move |ctx| {
-                async move {
-                    let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
-                    while let Ok((mut socket, _)) = listener.accept().await {
-                        socket.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from Bastion!").await.unwrap();
-                    }
-                    Ok(())
-                }
-            })
-        })
-    });
-
-    Bastion::block_until_stopped();
-}
-</code></pre>
-
-Bastion is designed for high availability and resilience using the supervisor model.
-Provides built-in fault tolerance, restarts, and message passing.
-Best for critical services that require fault isolation.<br>
-
-6. <strong><em>Glommio</em></strong>
-<pre><code class="language-rust">
-use glommio::{net::TcpListener, LocalExecutor};
-
-fn main() {
-    let ex = LocalExecutor::default();
-    ex.run(async {
-    let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
-    while let Ok(mut stream) = listener.accept().await {
-        stream.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from Glommio!").await.unwrap();
-        }
-    });
-}
-</code></pre>
-
-Glommio is designed for high-performance workloads on NUMA architectures. (UMA (Non-Uniform Memory Access) awareness refers to optimizing software to efficiently utilize the architecture of modern multi-socket and multi-core systems where memory access times vary depending on the processor accessing it. )
-It provides a thread-per-core model to minimize context switching.
-Best for low-latency, high-throughput applications.<br>
-
-7. <strong><em>Embassy</em></strong>
-
-<pre><code class="language-rust">
-#![no_std]
-#![no_main]
-
-use embassy_executor::Spawner;
-use embassy_net::{tcp::TcpSocket, Stack};
-
-#[embassy_executor::main]
-async fn main(spawner: Spawner) {
-    let mut stack = Stack::new();
-    let socket = TcpSocket::new(&stack);
-    socket.accept().await.unwrap();
-    socket.write_all(b"Hello from Embassy!").await.unwrap();
-}
-</code></pre>
-
-Embassy is a <em>no_std</em> async runtime for embedded systems.
-Optimized for resource-constrained environments.
-Requires specific hardware setups like RTOS or bare-metal.<br>
-
-</details>
-
-
 ## Executing the program
 
 Now we came to the point -how to call the tasks, aws functions etc?
@@ -2231,7 +1917,8 @@ if result.is_err() {
 }
 ```
 
-`main()`
+`#[tokio::main]
+async fn main()`
 The entry point of the program, where the execution begins.
 
 Initializes `OpenSSL` for static builds and sets up logging:
@@ -2295,6 +1982,59 @@ if args.flag_table == "all" {
         .expect("start crawler");
 }
 ```
+We preferred **tokio** runtime due to its more powerful and multi-threaded nature, which makes it a better fit for high-performance applications. Tokio is great in handling concurrent tasks, in scenarios such as working with databases, performing calculations, and dealing with I/O operations like reading and writing to files and cloud storage (S3).
+In contrast, **async-std** is simpler and more suited to lightweight applications and CLI tools.
+
+| Feature                          | **Tokio**                                                                                                                   | **async-std**                                                                                                                                                       |
+|----------------------------------|-----------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Runtime Model**                | Uses a **multi-threaded** runtime (by default), optimized for high performance.                                             | Uses a **thread-per-task** model, hich spawns a new OS thread per async task, leading to higher overhead and less efficient CPU utilization in large applications.. |
+| **Task scheduling**              | Has a cooperative task scheduler, meaning tasks voluntarily yield control, preventing any single task from starving others. | Relies on a less sophisticated scheduling model, which can lead to uneven workload distribution.                                                                    |
+| **Incoming Connection Handling** | Uses a `loop` to continuously accept connections and spawn new tasks.                                                       | Uses `while let Some(stream) = listener.incoming().next().await` to iterate over connections.                                                                       |
+| **Buffer Allocation**            | Uses a **fixed-size buffer** (`[0; 1024]`) for reading from the socket.                                                     | Uses a **dynamically allocated vector** (`vec![0; 1024]`), which may introduce heap allocations.                                                                    |
+| **Efficiency**                   | More efficient for **high-performance, concurrent workloads** (e.g., microservices, large-scale web apps).                  | Simpler API, but less optimized for high-load scenarios. Better for **small async utilities or CLI apps**.                                                          |
+
+
+These examples show implementation of a simple asynchronous HTTP server using tokio and async-std. The examples will handle incoming requests and respond with a simple message (the code is very similar)
+
+**Tokio**
+```rust
+use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+#[tokio::main]
+async fn main() {
+let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+println!("Listening on port 8080...");
+
+    loop {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        tokio::spawn(async move {
+            let mut buffer = [0; 1024];
+            socket.read(&mut buffer).await.unwrap();
+            socket.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from Tokio!").await.unwrap();
+        });
+    }
+}
+```
+
+**Async-std**
+```rust
+#[async_std::main]
+async fn main() {
+let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
+println!("Listening on port 8080...");
+
+    while let Some(stream) = listener.incoming().next().await {
+        let mut stream = stream.unwrap();
+        async_std::task::spawn(async move {
+            let mut buffer = vec![0; 1024];
+            stream.read(&mut buffer).await.unwrap();
+            stream.write_all(b"HTTP/1.1 200 OK\r\n\r\nHello from async-std!").await.unwrap();
+        });
+    }
+}
+```
+
 
 
 ## Versions
