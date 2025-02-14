@@ -20,6 +20,7 @@ tags: [Rust, AWS, S3, Postgres]
       -  [Uploading to S3](#uploading-to-s3)
       -  [Crawler](#crawler)
     - [Executing the program](#executing-the-program)
+- [Versions](#versions)
 - [Summary](#summary)
 
 
@@ -65,11 +66,10 @@ AWSAthena -->|Used in| Reports[Reports];
     class RustProgram,PostgresRDS,S3ParquetFiles,AWS_GLUE,AWSAthena,Reports process;
 </div>
 
-
 Instead of performing everything within Postgres, we built **_an ETL pipeline with Rust, AWS S3, AWS Glue and AWS Athena._**
 
 
-This **_Rust_** project was originally initiated by my colleague and Rust wizard, [Xavier](https://github.com/xrl). His guidance and expertise helped me not only get started with Rust but also truly appreciate its beauty, power, and advantages. Thanks to his mentorship, I’ve come to love working with Rust and have seen how it can transform complex workflows (or make it even more complex but blazing fast :wink: ).
+This **_Rust_** project was originally initiated by my colleague and Rust wizard, [**Xavier**](https://github.com/xrl). His guidance and expertise helped me not only get started with Rust but also truly appreciate its beauty, power, and advantages. Thanks to his mentorship, I’ve come to love working with Rust and have seen how it can transform complex workflows (or make it even more complex but blazing fast :wink: ).
 
 
 ### ETL overview:
@@ -93,9 +93,9 @@ AWS Glue was used to crawl the Parquet files on S3 and create metadata.
 Athena provided a cost-efficient way to query the data using SQL. Bear in mind that Athena doesn't create real tables or materialized views, it only creates a metadata and reads everything from the files, stored in S3.
 The reports used Athena tables and views as the foundation for data visualization.
 The cons of such approach were that it was possible to delete underlying file without getting any warnings/restrictions about dependant views, tables etc.
-Athena also didn't provide indexing as it was just a querying tool with its own flavor PrestoDB SQL, it was lacking some Postgres methods and didn't allow recursive functions as well as true **_materialized views_**. It also didn't support ***CREATE TABLE LIKE*** or ***DELETE FROM*** or ***UPDATE***, but it allowed to give an access to query a table without a fear that the table would be dropped as behind a hood it was a file in s3.
+Athena also didn't provide indexing as it was just a querying tool with its own flavor PrestoDB SQL, it was lacking some Postgres methods and didn't allow recursive functions as well as true **_materialized views_**. It also didn't support ***CREATE TABLE LIKE*** or ***DELETE FROM*** or ***UPDATE***, but it allowed to give an access to query a table without a fear that the table would be dropped as it was just a file in s3.
 
-AWS Glue provided a mechanism for partitioning and indexing with the limitations: 
+AWS Glue provided a mechanism for partition indexing with the limitations: 
 - only partition column could be used as an index
 - only integer and strings could be used as an index
 
@@ -155,7 +155,7 @@ was producing the result:
  data        | jsonb                       | YES
  ...
 ```
-This table description together with this [bash script](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-table_macro-sh) would give diesel _table!_ definition.
+This table description together with this [**bash script**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-table_macro-sh) would give diesel _table!_ definition.
 
 ```shell
 table! {
@@ -180,10 +180,10 @@ Using the _**diesel**_ _print-schema_ command, the schema for the specified tabl
 The _**diesel_ext**_ crate then was used to generate the Rust struct for that table, which was placed into the appropriate module.
 
 
-I created also a _**template_task**_ which was a blue-print for most tasks and used the _sed_ command to customize tasks' files (using [_**template_task**_](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-template_task-rs) ), creating a corresponding task in the project.
+I created also a [_**template_task**_](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-template_task-rs) which was a blue-print for most tasks and used the _sed_ command to customize tasks' files, creating a corresponding task in the project.
 
 
-Here’s the [Makefile](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_model-rs)  command that does all of this.
+Here’s the [**Makefile**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_model-rs)  command that does all of this.
 
 This approach saved considerable time and streamlined the process, reduced the chance of errors with types/nullables by automating the mapping process.
 
@@ -215,7 +215,7 @@ _**Table 3: products**_
 | 2  | product2 | 70       | 2023-01-20 | false    | 41.05 |
 | 3  | product3 | 2        | 2023-01-20 | true     | 11.05 |
 
-To combine these tables and add calculated fields, the Rust program used the following [structs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-tables_structs-rs) which looked like this:
+To combine these tables and add calculated fields, the Rust program used the following [**structs**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-tables_structs-rs) which looked like this:
 ```rust
 // project_schemas/tables/orders_tl.rs for Postgres diesel schema
 table! {
@@ -296,34 +296,43 @@ use super::prelude::*;
 use std::collections::HashMap;
 
 use project_schemas::tables::{
-    orders::dsl as orders_dsl, users::dsl as users_dsl, products::dsl as products_dsl,
+    orders::dsl as orders_dsl, users::dsl as users_dsl,
     currencies::dsl as currencies_dsl, taxes::dsl as taxes,
 };
 ```
 
 What `use super::prelude::*;` does:
 
-It imports all public items from the _**prelude**_ module defined in the parent module (super).
+It imports all public items from the _**prelude**_ module defined in the parent module (**super**).
 The `*` wildcard includes everything that is publicly available within the **_prelude_** module.
 
 This is a common Rust pattern to create a _**prelude**_ module that contains frequently used imports, making them available to other parts of the codebase without needing repetitive use statements.
 
 For example:
 
-In the prelude module, there are imports like `std::time::Instant, diesel::prelude::*, bigdecimal, rayon::prelude::*`, etc. By doing `use super::prelude::*;`,  **_combined_orders.rs_** task can directly use these items without specifying them individually.
+In the  [**prelude**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-task_mod-rs) module, there are imports like 
+```rust
+pub use std::time::Instant;
+pub use diesel::prelude::*;
+pub use bigdecimal::{BigDecimal, ToPrimitive};
+... 
+```
 
-The full [prelude](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-task_mod-rs) code.
+`pub mod prelude` makes the **prelude** module public.
 
-Which means I can use all public items from this module.
+`pub use std::time::Instant;` makes **Instant** available inside **prelude** and also public.
 
-The line `pub use ::function_name::named;` refers to re-exporting the named macro or function from the external crate function_name.
+By doing `pub use super::prelude::*;`,  **_combined_orders.rs_** task can directly use these items without specifying them individually.
+
+
+The line `pub use ::function_name::named;` refers to re-exporting the `named` macro from the external crate function_name.
 My idea was to use it for generating a file name on the fly in order to provide a file name for writing it down as a parquet file (it was at the beginning of my Rust journey) however, `use` cannot be used to dynamically retrieve the name of a function and store it as file name with writing the result of the calculation at runtime.
 
 In theory, what it does:
 
 `function_name` crate provides a procedural macro to retrieve the name of the current function at compile-time in Rust. It is often used for logging, debugging, or tracing purposes.
 
-`named` macro is a part of the `function_name` crate. It allows to annotate a function so I can programmatically access its name as a string.
+`named` macro is a part of the `function_name` crate. It allows to annotate a function, so I can programmatically access its name as a string (as I was going to do).
 
 When I apply `#[named]` to a function, it makes the name of the function accessible via a special variable _function_name_.
 I can then log or use the function's name directly.
@@ -339,9 +348,11 @@ fn example_function() {
 fn main() {
     example_function();
 }
+... 
+# prints
+# Function name: example_function
+
 ```
-and it would print
-`Function name: example_function`
 
 The _**prelude**_ model was inside `mod.rs` file which was in
 
@@ -369,7 +380,7 @@ then in the task **_combined_orders.rs_**:
 ```rust
 use std::collections::HashMap;
 ```
-Which imports the HashMap type from the Rust standard library (**_std::collections_**) into scope.
+Which imports the `HashMap` type from the Rust standard library into scope.
 
 ```rust
 use project_schemas::tables::{ ... };
@@ -404,7 +415,7 @@ It will handle the input, fields/types and write the struct to a file in Parquet
 
 Then there is the task itself, `pub` which means it can be called outside the module,
 the task takes as input a reference to a string (`&str`), representing PostgreSQL connection URI,  and returns a tuple of **String** and **bigint**.
-The full task code is [combined_orders.rs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-combined_orders-rs)
+The full task code is [**combined_orders.rs**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-combined_orders-rs)
 
 ```rust
 pub fn combined_orders(pg_uri: &str) -> (String, i64) {
@@ -418,17 +429,17 @@ Here:
 ```shell
 let orders = orders_dsl::orders.load::<Order>(&conn).unwrap();
 ```
-This line brings into scope the _DSLs (Domain-Specific Languages)_ for interacting with tables in the database, which allows us to interact with a relational database using the programming language's objects (e.g. structs) instead of writing raw SQL queries. Diesel ensures structs match database schema with implementing trait _**Queryable**_ for the struct. It generates the necessary code to convert a row from a database table into an instance of the struct. The struct fields must match the columns in the database table (in name and type).
+This line uses **Diesel**, a Rust **ORM** (Object-Relational Mapping) library, to load data from the orders table in the database into a Rust struct (`Order`). Diesel ensures structs match database schema with implementing trait _**Queryable**_ for the struct. It generates the necessary code to convert a row from a database table into an instance of the struct. The struct fields must match the columns in the database table (in name and type).
 
-Diesel uses DSLs to generate SQL queries and map the results to Rust types. The _users::dsl, orders::dsl_ etc refer to the corresponding tables, and I'm giving them aliases (_orders_dsl, users_dsl_, ...) for convenience and loading, filtering using DSL methods.
+**Diesel** uses DSLs to generate SQL queries and map the results to Rust types. The `users::dsl, orders::dsl` etc refer to the corresponding tables, and I'm giving them aliases (`orders_dsl, users_dsl`, ...) for convenience and loading, filtering using DSL methods.
 
 `orders_dsl::orders**`
 
-`orders_dsl` is the alias created for `orders::dsl`. _Diesel_ automatically generates a _orders_ variable (referring to the _orders_ table in the database) within this DSL module, which represents the table in the database.
+`orders_dsl` is the alias created for `orders::dsl`. **Diesel** automatically generates a `orders` variable (referring to the `orders` table in the database) within this DSL module, which represents the table in the database.
 
 ``.load::<Order>()`` is a Diesel method used to execute the query and load the results into a collection of Rust structs `Vec<Order>`.
 
-`Order` is a Rust struct representing the schema of the _**orders**_ table (i.e., it maps the columns of the _**orders**_ table to fields in the _**Order**_ struct).
+`Order` is a Rust struct representing the schema of the `orders` table (i.e., it maps the columns of the `orders` table to fields in the `Order` struct).
 
 `&conn` is a reference to a database connection, which is used to execute the query against the database. This connection is established using Diesel’s connection API ( _PgConnection_ for PostgreSQL).
 
@@ -463,25 +474,25 @@ let orders = orders_dsl::orders
 ```
 as here I will get an empty `Vec<Order>` into my data.
 
-Usually the `panic!()` was caused by changes in the underlying Postgres tables, like removed column, unexpected type etc. I couldn't dynamically construct a struct in Rust with Diesel - so if I had a column in my _table!_ macro definition and a struct but if `.load::<Order>` didn't find it - it resulted in panic.
-In that case running the task which was loading this table further didn't make sense hence `panic!()` behaviour was justified.
-
-There is also an operator **_?_**  which propagates errors if any occur during the creation of the file avoiding unexpected panic. 
+There is also an operator **_?_**  which propagates errors if any occur during the creation of the file avoiding unexpected panic.
 Requires `Result/Option` return:
 - If the operation returns _**Ok(value)**_, it extracts the value and continues execution.
 - If the operation returns **_Err(error)_**, it propagates the error to the calling function.
 
 Taking into account that the continuing the task without the connection to Postgres didn't make any sense, I have not considered this option.
 
+Usually the `panic!()` was caused by changes in the underlying Postgres tables, like removed column, unexpected type etc. I couldn't dynamically construct a struct in Rust with Diesel - so if I had a column in my _table!_ macro definition and a struct but if `.load::<Order>` didn't find it - it resulted in panic.
+In that case running the task which was loading this table further didn't make sense hence `panic!()` behaviour was justified.
+
 I wanted to see how long it takes to load some tables, for that I had
 ```rust
-    let users_load = Instant::now();
-    let users = users_dsl::users.load::<User>(&conn).unwrap();
-    trace!("load users took: {:?}", users_load.elapsed());
+let users_load = Instant::now();
+let users = users_dsl::users.load::<User>(&conn).unwrap();
+trace!("load users took: {:?}", users_load.elapsed());
 ```
 where `Instant::now()` creates a new Instant that represents the current time, essentially starting a stopwatch.
 `trace!` lane logs the time taken to execute the query and to load the table users from the database. It uses the `trace!` macro, which is typically used for logging at a very detailed level. The `elapsed()` duration is formatted and printed to show how long the query took to execute.
-The `elapsed()` method in Rust returns a `Duration` object, which represents the amount of time that has passed since the `Instant` was created. The unit of time in `Duration` is nanoseconds (ns).
+The `elapsed()` method in Rust returns a `Duration` object, which represents the amount of time that has passed since the `Instant` was created with nanoseconds (ns) as the unit of time.
 This information could be useful for monitoring and optimization.
 The duration could be converted to different units as 
 ```rust
@@ -490,18 +501,18 @@ println!("Elapsed time in seconds: {:?}", users_load.as_secs());
 println!("Elapsed time in microseconds: {:?}", users_load.as_micros());
 ```
 
-In order to collect all **_users_** ids and also all **_orders_** ids from the **_users_** table:
+In order to collect all **_users_** ids and also all **_orders_** ids from the **_orders_** table:
 ```rust
-let users_ids: Vec<i32> = users.iter().map(|x| x.id).collect();
-trace!("{:?}", users_ids.len());
-let order_ids: Vec<i32> = users.iter().filter_map(|x| x.order_id).collect();
+let orders_ids: Vec<i32> = orders.iter().map(|x| x.id).collect();
+trace!("{:?}", orders_ids.len());
+let users_ids: Vec<i32> = orders.iter().filter_map(|x| x.user_id).collect();
 ```
-`users.iter()` creates an iterator over the **users** vector, producing references to each **User** object, without consuming the collection.
-It returns an iterator of type `std::slice::Iter<'_, T>`, in this case `users` is `Vec<User>`, so **T = User**.
+`orders.iter()` creates an iterator over the **orders** vector, producing references to each **Order** object, without consuming the collection.
+It returns an iterator of type `std::slice::Iter<'_, T>`, in this case `orders` is `Vec<Order>`, so **T = Order**.
 
-`.map(|x| x.id)` takes every **users** record, extract value from the field `id` and collects them into a vector if integers `Vec<i32>`.
+`.map(|x| x.id)` takes every **orders** record, extract value from the field `id` and collects them into a vector if integers `Vec<i32>`. If there is no `id` field (hypothetically) it will panic, because according to our struct `id` in `orders` is `pub id: i32,` not `Option<i32>`.
 
-`.filter_map(|x| x.order_id).collect()` creates a vector (**order_ids**) that contains the **order_id** field of each **user** from the **users** vector, but only if **order_id** is `Some(i32)`. The `filter_map` function filters out **None** values and collects only `Some(i32)` values into the vector. This results in a list of **order_ids** from **users**.
+`.filter_map(|x| x.user_id).collect()` creates a vector (**user_ids**) that contains the **user_id** field of each **order** from the **orders** vector, but only if **user_id** is `Some(i32)`. The `filter_map` function filters out **None** values and collects only `Some(i32)` values into the vector. This results in a list of **user_id** from **orders**.
 
 I want to get **currency**, corresponding with the **order_id** so for that I load **currencies** table, filtering it by two fields: `type` and `type_id`
 ```rust
@@ -512,9 +523,10 @@ let currencies: Vec<Currency> = currencies_dsl::currencies
         .unwrap();
 ```
 `.filter(currencies_dsl::type.eq("Order"))`
-Filters the **currencies** table to only include rows where the type column is equal to "Order".
+filters the **currencies** table to only include rows where the type column is equal to "Order".
+
 `.filter(currencies_dsl::type_id.eq(any(&order_ids[..])))`
-Filters the **currencies** table to only include rows where the **type_id** column matches one of the **order_ids** collected from the **users** table.
+filters the **currencies** table to only include rows where the **type_id** column matches one of the **order_ids** collected from the **users** table.
 
 Now I want to have a **HashMap** where keys are `order_id` and the values are references to the corresponding **Currency** objects.
 
@@ -546,35 +558,36 @@ Values of type **&Currency**, which are references to the **Currency** objects.
 
 Which creates kind of a lookup table, when I can pass a key (type_id = order_id in this case) and get a corresponding **Currency** object with all the fields.
 
-Before starting the collection of all the data I define the path/name of the future parquet file I'm going to write data into.
 **CombinedOrder** combines fields from both tables and includes a derived field **amount_usd** using the information from currencies table and **amount_with_tax** using the information from **taxes** table.
 
 ```rust
-    let parquet_records: Vec<CombinedOrderRecord> = orders
-        .iter()
-        .filter(|order| order.user_id.is_some())
-        .filter(|order| order.active)
-        .map(|o| {
+let parquet_records: Vec<CombinedOrderRecord> = orders
+    .iter()
+    .filter(|order| order.user_id.is_some())
+    .filter(|order| order.active)
+    .map(|o| {
 ```
 `orders.iter().filter(|order| order.user_id.is_some())` filters out orders where the `user_id` is **None**. This ensures only orders associated with a user are processed further.
 
-The `.map(|o| { ... })` transforms each filtered `order (o)` into a new representation, producing a `CombinedOrderRecord`.
+The `.map(|o| { ... })` transforms each filtered `order (o)` (reference to `Order` ) into a new representation, producing a `CombinedOrderRecord`.
 
 `let currency = currencies_by_order_id_id.get(&o.id)` retrieves the currency information for the current order from the `currencies_by_order_id_id` `HashMap` mapping described above, using the order's `id` as a key. If no entry exists, currency is **None**.
 ```rust
 let conversion_rate = currency
     .map(|x| {
-    x.conversion_rate
-    .clone()
-    .map(|cr| cr.to_f64().expect("bigdecimal to f64"))
-    .expect("Unwrapping currency in Orders")
+        x.conversion_rate
+        .clone()
+        .map(|cr| cr.to_f64().expect("bigdecimal to f64"))
+        .expect("Unwrapping currency in Orders")
     })
     .unwrap_or(1.0);
 ```
 extracts the conversion rate from the currency (if it exists). 
 The logic:
-`currency.map(|x| ...)` operates on the optional **currency** object.
-If a currency exists, its `conversion_rate` is cloned and converted to a **_f64_**. 
+The outer `.map(|x| {...})` operates on the optional **currency** object `Option<Currency>` and processes the **currency** if it is `Some`.
+`x.conversion_rate` is also an `Option<BigDecimal>`.
+
+So if a currency exists, and it has a value in `conversion_rate` field, its `conversion_rate` is cloned and converted to a **_f64_**. 
 If conversion `to_f64()` fails, an `expect` statement ensures a panic with an error message.
 If no currency exists (`currency.is_none()`), a default conversion rate of `1.0` is used via `.unwrap_or(1.0)`.
 
@@ -585,7 +598,7 @@ This is necessary because `BigDecimal` does not implement the `Copy` trait as **
 Without `.clone()`, calling `x.conversion_rate.map(...)` would move the value out of `x.conversion_rate`.
 
 If `x.conversion_rate` is used later in the code, this would cause a compile-time error because the value has been moved.
-`Bigdecimal` is a complex value as it represents arbitrary-precision decimal numbers.
+
 In order to avoid cloning now I'd better do
 ```rust
 let conversion_rate = currency
@@ -599,20 +612,27 @@ let conversion_rate = currency
     .unwrap_or(1.0);
 ```
 where `as_ref()` converts `Option<T> to Option<&T>`, allowing borrowing the value instead of moving or cloning it.
-or 
+Probably the better choice would be simplifying the code with
 ```rust
 let conversion_rate = currency
     .and_then(|x| x.conversion_rate)
     .map(|cr| cr.to_f64().expect("bigdecimal to f64"))
     .unwrap_or(1.0);
 ```
-`and_then` avoids intermediate map calls and also flattens the nested `Option` structure.
+`currency.and_then(|x| x.conversion_rate.clone())` if **currency** is Some, it extracts **x.conversion_rate** (which is also an **Option**).
+If currency is `None`, it returns `None`.
+
+`.map(|cr| cr.to_f64().expect("bigdecimal to f64"))` converts the **BigDecimal** to an **f64** if **x.conversion_rate** is **Some**.
+
+`.unwrap_or(1.0)` - a default value of 1.0 if either **currency** or **x.conversion_rate** is **None**.
 
 `let currency_name = ...` uses the same logic:
 If no **currency** exists, the fallback is `.unwrap_or_else(|| "USD".to_string())`.
 The same logic is for extracting `user_email` and `country` from the **User** object.
 
-With similar logic I extract **Tax** object based on the corresponding `order_id` and getting a `tax_rate` via `let tax_rate = taxes.map(|x| x.rate.to_f64().expect("tax rate bigdecimal to f64"));` with a descriptive error message - In case the conversion to `f64` failed I know which field is responsible for that.
+With similar logic I extract **Tax** object based on the corresponding `order_id` and getting a `tax_rate` via 
+
+`let tax_rate = taxes.map(|x| x.rate.to_f64().expect("tax rate bigdecimal to f64"));` with a descriptive error message - in case the conversion to `f64` failed I know which field is responsible for that.
 
 
 **CombinedOrder** combines fields from both tables and includes a derived field **amount_with_tax**.
@@ -633,12 +653,10 @@ What do we need to do for that?
     ```rust
     let path = "/tmp/combined_orders.parquet";
     let mut count = 0; // to count the number of row groups
-
-    let parquet_records: Vec<CombinedOrderRecord> = orders
     ...
     ```
 
-2.  Get the Schema
+2.  Get the schema
 
     ```rust
     let schema = parquet_records.as_slice().schema().unwrap();
@@ -650,14 +668,14 @@ What do we need to do for that?
 ```rust
 let schema = &parquet_records.schema().unwrap();
 ```
-I'll get `Method schema not found in the current scope for type Vec<FeatureSet>`
+I'll get `Method schema not found in the current scope for type Vec<CombinedOrderRecord>`
 
     `.schema()` is a method provided by a trait **_ParquetRecordWriter_**, which extracts the Parquet schema from the data structure (`schema()` returns `Result<parquet::schema::types::TypePtr, parquet::errors::ParquetError>` ).
 
     `.unwrap()` is used to handle the Result type returned by `.schema()`, which will panic if the operation fails. If the schema extraction is successful, it returns the schema object.
 
-3.  Open File for Writing
-    Here I'm borrowing **path** variable, as I need to use it later for the reader.
+3.  Open file for writing: 
+    here I'm borrowing **path** variable, as I need to use it later for the reader.
 
     ```rust
     let file = std::fs::File::create(&path).unwrap();
@@ -683,17 +701,21 @@ I'll get `Method schema not found in the current scope for type Vec<FeatureSet>`
     }
     ```
     where
-    `pub fn props() -> Arc<WriterProperties>`  defines a public function named props that returns a reference-counted (Arc) instance of **WriterProperties**.
+    `pub fn props() -> Arc<WriterProperties>`  defines a public function named **props** that returns a reference-counted (**Arc**) instance of **WriterProperties**.
     **Arc** stands for **_Atomic Reference Counting_**, which allows safe, shared ownership of data across multiple threads in a concurrent environment.
     `WriterProperties` is a struct from the **_parquet_** crate used to configure properties for writing Parquet files.
     
-    `WriterProperties::builder()`*  initializes a builder pattern for creating `WriterProperties` instances, which allows chaining of configuration methods.
+    `WriterProperties::builder()` initializes a builder pattern for creating `WriterProperties` instances, which allows chaining of configuration methods.
+
     `.set_compression(parquet::basic::Compression::GZIP)` configures the writer to use **_GZIP_** compression for **_Parquet_** file output.
+
     `parquet::basic::Compression::GZIP` specifies GZIP as the compression codec.
+
     `.build()` finalizes and constructs an instance of `WriterProperties` with the specified settings.
+
     `Arc::new(...)` wraps the created `WriterProperties` inside an **_Arc_**, enabling shared ownership.
      
-4.  Write Data to the File
+4.  Write data to the file
     
     ```rust
     let mut row_group = pfile.next_row_group().unwrap();
@@ -705,25 +727,29 @@ I'll get `Method schema not found in the current scope for type Vec<FeatureSet>`
     println!("{} count", count);
     ```
 
-    `pfile.next_row_group():`
+    `pfile.next_row_group()` 
     Prepares the next row group for writing.
     Row groups are logical blocks of rows within a Parquet file.
-    `write_to_row_group:`
+
+    `write_to_row_group`
     Serializes the `parquet_records` and writes them to the current row group.
     Panics with a custom error message if writing fails.
-    `pfile.close_row_group(row_group):`
+
+    `pfile.close_row_group(row_group)`
     Closes the row group after writing.
-    `count:`
+
+    `count`
     Tracks the number of row groups written.
     This code increments and prints it.
     
-5.  Finalize the File
+5.  Finalize the file
     `pfile.close().unwrap();`
-    `.close()`: when writing data to a file, it is often buffered in memory before being written to disk.
+
+    `.close()`- when writing data to a file, it is often buffered in memory before being written to disk.
     Calling `close()` ensures  that resources are properly released and all buffered data is written (flushed) to the file system, preventing data loss.
     
     
-6. Read Metadata from the File for prometheus metrics
+6. Read metadata from the file for prometheus metrics
     
     ```rust
     let reader = SerializedFileReader::try_from(path).unwrap();
@@ -733,17 +759,17 @@ I'll get `Method schema not found in the current scope for type Vec<FeatureSet>`
     (path.into(), rows_number)
     ```
 
-    `SerializedFileReader::try_from(path):`
-    Opens the written Parquet file for reading. Here, path is borrowed, this is because the method `try_from` doesn't take ownership of `path` variable, it takes a reference (`&path`), and so no ownership transfer occurs. The ownership of `path` remains with the original variable.
-    Reads the file metadata for verification or further processing.
-    `file_metadata.num_rows():`
+    `SerializedFileReader::try_from(path)`
+    Opens the written Parquet file for reading and reads the file metadata for verification or further processing. Here, path is borrowed, this is because the method `try_from` doesn't take ownership of `path` variable, it takes a reference (`&path`), and so no ownership transfer occurs. The ownership of `path` remains with the original variable.
+
+    `file_metadata.num_rows()`
     Retrieves the number of rows written to the file.
-    `(path.into(), rows_number):`
+
+    `(path.into(), rows_number)`
     Returns the file `path` and the number of rows as the output of the task.
     The `into()` method consumes `path` and attempts to convert it into the type specified in the tuple (**String** for this function).
 
-7. Running the task
-   After we defined the function `pub fn combined_orders()` we need to implement the trait to run the task that fetches data and stores it. 
+7. Running the task: after we defined the function `pub fn combined_orders()` we need to implement the trait to run the task that fetches data and stores it. 
    For that after the function we have:
 
 ```rust
@@ -756,7 +782,8 @@ impl ProjectTask for CombinedOrdersTask {
 }
 ```
 `CombinedOrdersTask` is an empty public struct, used as a unit struct to represent a specific task related to processing combined orders.
-It acts as a concrete implementation of the `ProjectTask` trait.
+It acts as a concrete implementation of the `ProjectTask` trait. Traits in Rust cannot be implemented directly for functions (`combined_orders`).
+By defining `CombinedOrdersTask`, I can implement the `ProjectTask` trait and provide a run method that calls `combined_orders`. Using a trait `ProjectTask` allows us to treat different tasks uniformly (which we do in `project_cli`) and if later I need to add more functionality to tasks (e.g., logging, error handling, or retries), I can do so in the `run` method of the trait implementation without changing the functions themselves.
 
 The `run` function is implemented to execute the `combined_orders` function, which processes data from the PostgreSQL database.
 It follows the `ProjectTask` trait signature (`fn run(&self, postgres_uri: &str) -> (String, i64);`).
@@ -883,7 +910,7 @@ pub trait HugeStreamTask: Debug + Sync + Send + RefUnwindSafe + UnwindSafe {
     async fn run(&self, postgres_uri: &str) -> Vec<(NaiveDate, PathBuf, u128, i64)>;
 }
 ```
-In the [streaming_task.rs](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-streaming_task-rs) the `ProductRecordStream` struct, derived with `ParquetRecordWriter` and `sqlx::FromRow`, and `Default` and `Debug` which provide automatic implementations of functionalities that help with extracting struct field names, fetching data from Postgres and writing it to Parquet files.
+In the [**streaming_task.rs**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-streaming_task-rs) the `ProductRecordStream` struct, derived with `ParquetRecordWriter` and `sqlx::FromRow`, and `Default` and `Debug` which provide automatic implementations of functionalities that help with extracting struct field names, fetching data from Postgres and writing it to Parquet files.
 
 `sqlx::FromRow`  derive macro enables the struct to be used with SQLx to map database query results directly into Rust structs.
 
@@ -941,7 +968,7 @@ Extracting Schema Information from the Struct
 ```rust
 let schema = fake_products.as_slice().schema().unwrap();
 let schema_2 = fake_products.as_slice().schema().unwrap();
-let schema_vec = schema.get_fields();
+let schema_vec = schema_2.get_fields();
 ```
 The code extracts schema details from the sample data.
 `fake_products.as_slice().schema().unwrap()` retrieves schema metadata, such as field names and types.
@@ -996,7 +1023,9 @@ In my case:
 `schema_vec` borrows schema when calling `.get_fields()`.
 `schema` is moved into `SerializedFileWriter::new()`, invalidating the borrow.
 
-Could be fixed by doing `let mut pfile = SerializedFileWriter::new(file, schema.clone(), props()).unwrap();` so here `schema.clone()` creates a new copy, and `schema` remains valid.
+Could be fixed by doing 
+
+`let mut pfile = SerializedFileWriter::new(file, schema.clone(), props()).unwrap();` so here `schema.clone()` creates a new copy, and `schema` remains valid.
 I can Not do `SerializedFileWriter::new(file, &schema, props())` because `SerializedFileWriter` expects `Arc<Type>` not `&Arc<Type>`.
 
 If I do `let schema_vec = &schema.get_fields();` then I get 
@@ -1125,8 +1154,8 @@ Most primitive types in <em>Rust</em> (like integers and String) are <em>Send</e
 <code><strong>Raw pointers</strong></code>:<br>
   <ul>Lack Safety Guarantees:<br>
 
-  <li>They do not enforce borrow checking, lifetimes, or ownership rules.</li>
-  <li>This means I can create dangling pointers, null pointers, or data races if not handled carefully.</li>
+  <li>They do not enforce borrow checking, lifetimes, or ownership rules.
+  This means I can create dangling pointers, null pointers, or data races if not handled carefully.</li>
   <li>Use Cases:</li>
 
 Raw pointers are typically used in unsafe code for advanced scenarios, such as:<br>
@@ -1359,7 +1388,13 @@ impl<W: 'static + ParquetWriter> FileWriterRows for SerializedFileWriter<W> {
    }
 }
 ```
-Implements the FileWriterRows trait for `SerializedFileWriter<W>`, which is responsible for writing Parquet data to a file.
+Implements the `FileWriterRows` trait for `SerializedFileWriter<W>`, which is responsible for writing Parquet data to a file.
+
+`W` is a generic type parameter, meaning this implementation works for any type that satisfies the given constraints.
+
+`'static (Lifetime Bound)`  means that the type `W` must not contain any non-static references, so type `W` must live for the entire program's duration or be completely owned (no borrowed references).
+The `'static` bound ensures that `SerializedFileWriter<W>` does not hold references that might expire while it's being used. This is useful when dealing with long-lived or async operations.
+
 The issue: we used to have `&self.total_num_rows` from  `parquet::file::writer::SerializedFileWriter`
 ```rust
 pub struct SerializedFileWriter<W: ParquetWriter> {
@@ -1369,7 +1404,7 @@ pub struct SerializedFileWriter<W: ParquetWriter> {
     props: WriterPropertiesPtr,
     total_num_rows: i64,...
 ```
-but after another crate update it became a private field so we lost access to it. TODO was to figure it out but at the end we just hardcoded a meaningless number.
+but after another crate update it became a private field, and we lost access to it. TODO was to figure it out but at the end we just hardcoded a meaningless number.
 
 Module prelude
 ```rust
@@ -1385,7 +1420,7 @@ Provides a convenient way to import commonly used items by simply writing use `p
 
 We used to define `pub fn parquet_writer<R: RecordWriter<R>>...` in our `project_parquet` but after switching to the newer version of `parquet` there was no need in it.
 
-After the file is written to parquet format it needed to be uploaded to S3 bucket.
+After the file was written to parquet format, we needed to upload it to S3 bucket.
 
 ## AWS
 
@@ -1414,7 +1449,7 @@ But later switched to these when they become available:
 
 #### Uploading to S3
 
-Here is the [upload](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-upload_to_s3-rs) function
+Here is the [**upload**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-upload_to_s3-rs) function
 
 What happens here:
 ```rust
@@ -1439,6 +1474,12 @@ pub async fn upload(
 If successful, it returns `Ok(())`.
 If an error occurs, it returns a boxed error (dynamic error trait).
 
+`Box<dyn std::error::Error>`  The error type (`E`) is a boxed trait object that implements `std::error::Error`. This means:
+
+The function can return any kind of error that implements the `Error` trait.
+The error is heap-allocated using `Box`, allowing for dynamic dispatch (useful for returning different error types).
+It enables propagating multiple types of errors without needing to define a specific error enum.
+
 These operations can take time, so rather than blocking the execution of the entire program while waiting for them to complete, I allow the program to continue doing other things while waiting for the results.
 Later using these functions I got into some 'freeze' but I'll write about it later.
 
@@ -1462,7 +1503,7 @@ Loading AWS S3 configuration:
 ```rust
 let config = aws_config::from_env().region(REGION).load().await;
 ```
-`aws_config::from_env()`: Loads AWS credentials and configuration (such as access keys, regions) from environment variables.
+`aws_config::from_env()`: Loads AWS credentials and configuration (such as access keys, secrets) from environment variables.
 
 `.region(REGION)`: Specifies the AWS region to use.
 
@@ -1515,7 +1556,7 @@ but later switched to `aws_config`
 
 #### Crawler
 
-After uploading file to S3 we had to [crawl](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_crawler-rs) it with the Glue crawler, but initially had to create the function which would create crawler if it didn't exist.
+After uploading file to S3 we had to [**crawl**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-create_crawler-rs) it with the Glue crawler, but initially had to create the function which would create crawler if it didn't exist.
 
 What does this function do? 
 - Loads AWS credentials and region configuration.
@@ -1618,9 +1659,9 @@ or change the logic to using some default values like
            .database_name("database_name".to_string())
            .role(iam_role)
            .targets(
-           CrawlerTargets::builder()
-               .s3_targets(S3Target::builder().path(path).build())
-               .build(),
+               CrawlerTargets::builder()
+                   .s3_targets(S3Target::builder().path(path).build())
+                   .build(),
             )
            .send()
            .await;
@@ -1642,13 +1683,12 @@ It builds an AWS Glue crawler with:
 Sends the create request and logs the success.
 Uses `.unwrap()` on the response, which may panic if there's an error.
 
-If Crawler Exists: if the program logs that the crawler already exists.
+If Crawler exists: if the program logs that the crawler already exists.
 
-7. Returning Success: `Ok(())`
 The function returns successfully if all operations complete without error.
 
 Then we need to start a crawler which was the tricky part: if the crawler has already started, it will produce an error and stop the program execution.
-For that we added a part for [waiting](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-start_crawler-rs)) with up to 20 attempts until the crawler was ready,
+For that we added a part for [**waiting**](https://gist.github.com/kraftaa/1c60a3652d85aee34d53a4ca10f7a80c#file-start_crawler-rs) with up to 20 attempts until the crawler was ready,
 
 What it does:
 
@@ -1814,7 +1854,7 @@ But if I use `tokio` then it as other async runtimes, uses a thread pool to run 
 [//]: # (| **embassy**| Embedded/IoT devices         | no_std async support           | Specialized       |)
 
 <details>
-  <summary><strong><em>While writing this I decided to check what other async runtimes are available in Rust and created a short summary</em></strong></summary>
+  <summary><strong><em>While writing this I decided to check what other async runtimes are available in Rust and created a short summary with the examples</em></strong></summary>
   <em>Comparison Summary</em>
   <table>
   <thead>
@@ -1900,7 +1940,7 @@ Best for high-performance web applications.
 Rich ecosystem with support for databases, networking, and concurrency utilities.
 Uses tasks and an I/O driver to handle concurrency efficiently.<br>
 
-2. <em>async-std</em>
+2. <strong><em>async-std</em></strong>
 
 <pre><code class="language-rust">
 use async_std::net::TcpListener;
@@ -1926,7 +1966,7 @@ Best for simpler async applications and CLI tools.
 Has a simpler API compared to Tokio but less optimized for high throughput.
 Built on top of <em>async-io</em>.<br>
 
-3. <em>smol</em>
+3. <strong><em>smol</em></strong>
 <pre><code class="language-rust">
 use smol::net::TcpListener;
 use smol::prelude::*;
@@ -1954,7 +1994,7 @@ Great for embedded devices or minimal environments.
 Fewer dependencies compared to <em>Tokio</em> and <em>async-std</em>.
 Uses thread-pool only when necessary.<br>
 
-4. <em>Actix</em>
+4. <strong><em>Actix</em></strong>
 <pre><code class="language-rust">
 use actix_web::{web, App, HttpServer, Responder};
 
@@ -1976,7 +2016,7 @@ Excellent performance in handling web requests compared to other runtimes.
 Built on Tokio but provides an abstraction layer with actors for better concurrency.
 Has built-in middleware support for web development.<br>
 
-5. <em>Bastion</em>
+5. <strong><em>Bastion</em></strong>
 <pre><code class="language-rust">
 use bastion::prelude::*;
 use tokio::net::TcpListener;
@@ -2009,7 +2049,7 @@ Bastion is designed for high availability and resilience using the supervisor mo
 Provides built-in fault tolerance, restarts, and message passing.
 Best for critical services that require fault isolation.<br>
 
-6. <em>Glommio</em>
+6. <strong><em>Glommio</em></strong>
 <pre><code class="language-rust">
 use glommio::{net::TcpListener, LocalExecutor};
 
@@ -2028,7 +2068,8 @@ Glommio is designed for high-performance workloads on NUMA architectures. (UMA (
 It provides a thread-per-core model to minimize context switching.
 Best for low-latency, high-throughput applications.<br>
 
-7. <em>Embassy</em>
+7. <strong><em>Embassy</em></strong>
+
 <pre><code class="language-rust">
 #![no_std]
 #![no_main]
@@ -2075,8 +2116,7 @@ pub struct Args {
     pub flag_limit: usize,
     pub flag_upload: String,
     pub flag_file: String,
-    pub flag_kevel: String,
-    pub flag_netsuite: String,
+    pub flag_extra: String,
 }
 ```
 This struct is used to capture command-line arguments for database URI, table name, file upload settings, and limits.
@@ -2111,6 +2151,15 @@ fn tasks_list() -> Vec<(&'static str, Box<dyn ProjectTask>)> {
 }
 ```
 This function returns a list of tasks that will be executed, each encapsulated in a dynamic trait object (`Box<dyn ProjectTask>`).
+Here: 
+`dyn ProjectTask` (Trait Object) represents any type that implements the `ProjectTask` trait (it's why we were implementing it in each task).
+Since traits don't have a fixed size, they cannot be stored directly in a `Vec` (which requires fixed-size elements).
+
+`Box<dyn ProjectTask>` (Heap Allocation)
+`Box<T>` allocates `T`on the heap and stores a pointer to it.
+
+`Box<dyn ProjectTask>` allows different struct types (implementing `ProjectTask`) to be stored in the same `Vec`, avoiding the issue of unknown size.
+
 
 `project_cli/bin/main.rs`
 The `main.rs` file serves as the entry point for the application and handles the execution of tasks.
@@ -2248,6 +2297,10 @@ if args.flag_table == "all" {
 ```
 
 
+## Versions
+
+This code was written for Rust 1.69.0. I considered updating it to Rust 1.82, but the number of changes required was significant. Since the program will be deprecated soon, updating it didn’t seem worthwhile
+
 ## Summary
 
 ### Pros of This ETL Approach
@@ -2272,7 +2325,7 @@ Using Rust structs ensured type safety, reducing errors in transformations.
 
 By integrating with AWS Glue and Athena, I could query enriched data using SQL without additional infrastructure.
 
-And one of the most important con: a lot of Rust learning :) 
+And one of the most important pros: a lot of Rust learning :) 
 For me personally writing Rust code is very satisfying as it requires to know what exactly I want to do, and what exactly I want to receive as the result.
 
 
@@ -2282,7 +2335,7 @@ _**Additional Infrastructure:**_
 
 Maintaining the Rust program, S3 buckets, and Glue crawlers adds complexity.
 
-**_Latency:**_
+**_Latency:_**
 
 Data in Athena is only as fresh as the last ETL run, so it may not be suitable for real-time use cases.
 
@@ -2292,7 +2345,7 @@ Writing and testing the Rust ETL pipeline required a significant upfront effort.
 
 **_Conclusion_**
 
-By moving ETL workloads to a Rust-based pipeline, I was able to address security concerns, reduce operational complexity, and optimize costs. Postgres remained focused on its core transactional role, while combined data was efficiently stored and queried using modern tools like S3 and Athena.
+By moving ETL workloads to a Rust-based pipeline, we were able to address security concerns, reduce operational complexity, and optimize costs. Postgres remained focused on its core transactional role, while combined data was efficiently stored and queried using modern tools like S3 and Athena.
 
 
-This approach can be a template for teams looking to offload heavy ETL processes without burdening their databases.
+This approach can be give some ideas for teams looking to offload heavy ETL processes without burdening their databases.
