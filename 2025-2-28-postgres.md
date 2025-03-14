@@ -63,7 +63,7 @@ Choosing the Right Backend
 
 When you're building a cloud-native ETL pipeline, picking the right data warehouse is crucial. Here's what we focused on:
 
-<span id="security">2.1. Security</span>
+**<span id="security">2.1. Security</span>**
 
 Security was non-negotiable in our design. We made sure all data transfers were encrypted and followed industry-standard security practices for both storage and access control. Going with cloud-native solutions like AWS S3 let us easily incorporate encryption and access management best practices.
 
@@ -79,13 +79,13 @@ _Secrets Management_: Database credentials and API keys live safely in Kubernete
 
 These measures combine to create a defense-in-depth approach that keeps our data pipeline secure.
 
-<span id="performance">2.2. Performance</span>
+**<span id="performance">2.2. Performance</span>**
 
 Performance is critical when you're dealing with large data pipelines. We designed our data flow to handle high-volume data without slowing down our main application. By optimizing our Postgres queries and leveraging Rust's parallelism capabilities, we keep data processing quick and efficient. Rust's low-level memory control also helped minimize overhead during batch processing.
 
 Our performance optimization definition includes:
 
-_Efficient Streaming_: Streaming a data in chunks.
+_Efficient Streaming_: Streaming a data in chunks for the big tables.
 
 _Parallel Processing_: Rust's concurrency model lets us process multiple chunks of data at the same time using **tokio::spawn**.
 
@@ -93,24 +93,32 @@ _Columnar Data Format_: Using Parquet as our output format dramatically improves
 
 _Query Optimization_: We make effective use of database indexes and design queries to minimize unnecessary data retrieval.
 
-Here's how we approach pagination:
+Here's how we approach streaming:
 
 ```rust
-use crate::schema::purchase_orders::dsl::*;
-fn paginate(connection: &PgConnection, offset: i64, limit: i64) -> QueryResult<Vec<PurchaseOrderRecord>> {
-    purchase_orders
-        .limit(limit)
-        .offset(offset)
-        .load:<PurchaseOrder>(connection)
+pub use futures_util::stream::StreamExt;
+pub use sqlx::postgres::PgPool;
+
+let pool = PgPool::connect(pg_uri).await?;
+let q = sqlx::query_as::<sqlx::Postgres, WPCStreamRecord>(&query);
+
+let mut chunk_stream = wpc_stream.map(|fs| fs.unwrap()).chunks(5000);
+while let Some(chunks) = chunk_stream.next().await {
+  let mut row_group = pfile.next_row_group().unwrap();
+  (&chunks[..])
+    .write_to_row_group(&mut row_group)
+    .expect("can't 'write_to_row_group' ...");
+  pfile.close_row_group(row_group).unwrap();
 }
 ```
 This approach lets us process millions of records efficiently without overwhelming system memory.
 
-<span id="complexity">2.3 Operational Complexity</span>
+**<span id="complexity">2.3 Operational Complexity</span>**
 
-Managing an ETL pipeline can quickly become unmanageable, especially when while scaling up. We kept operational complexity in check by leaning on Rust's type safety. Rust catches errors at compile-time, which means we avoid a ton of runtime exceptions. This makes maintenance way smoother and reduces the chances of issues popping up in production.
+Managing an ETL pipeline can quickly become unmanageable, especially when while scaling up. We kept operational complexity in check by leaning on Rust's type safety.
 
-In a traditional ETL pipeline built with something like Python, many errors only show up at runtime - potentially after the pipeline has been running for a while. With Rust, we catch problems at compile-time, which means:
+In a traditional ETL pipeline built with something like Python, many errors only show up at runtime - potentially after the pipeline has been running for a while.
+With Rust, we catch problems at compile-time, which means:
 
 _Fewer Production Incidents_: Type mismatches and null pointer exceptions get caught before deployment, not propagating the wrong data into the reports.
 
@@ -120,13 +128,13 @@ _Clearer Error Handling_: Rust's Result and Option types force us to explicitly 
 
 This focus on type safety improves reliability and helps us to maintain our pipeline.
 
-<span id="why-rust">3. Why Rust</span>
+**<span id="why-rust">3. Why Rust</span>**
 
 **The Perfect Language for Cloud-Native ETL**
 
 Rust wasn't the first choice for ETL when we started this project. The data engineering was mostly focused on Python, Scala (with Spark), and specialized tools like **dbt**. Here's why we went against the mainstream solutions with Rust, and what other options we considered.
 
-<span id="context">3.1. The Context and Alternatives</span>
+**<span id="context">3.1. The Context and Alternatives</span>**
 
 When we started this project, the data engineering was mostly using:
 
@@ -141,7 +149,7 @@ _dbt_: Was lacking some features we needed for raw data extraction and transform
 We needed something lightweight but powerful, with high performance and strong type safety. 
 Rust looked promising.
 
-<span id="type-safety">3.2 Type Safety</span>
+**<span id="type-safety">3.2 Type Safety</span>**
 
 Unlike Python where runtime errors are implied, Rust ensures type safety from the application layer all the way to table definitions. By catching errors at compile-time, we dramatically reduce the chances of runtime failures.
 
@@ -189,7 +197,7 @@ It validates data before serialization to Parquet
 
 The compiler makes sure we handle all potential type mismatches, null values, and conversion errors. You just can't get this level of safety with dynamically typed languages.
 
-<span id="performance-rust">3.3 Performance Considerations</span>
+**<span id="performance-rust">3.3 Performance Considerations</span>**
 
 Rust isn't just safe; it's blazing fast. We're dealing with large datasets, and Rust's performance is hard to beat for data processing tasks. Plus, it lets us create small executables with minimal memory overhead, which is perfect for cloud environments.
 
@@ -203,7 +211,7 @@ _Small Binaries_: Our compiled ETL applications are typically under 250MB, which
 
 When we're processing time-sensitive data, these performance benefits translate directly to the fresher data for analysis and decision-making.
 
-<span id="challenges-rust">3.4 The Challenges of Working with Rust</span>
+**<span id="challenges-rust">3.4 The Challenges of Working with Rust</span>**
 
 Working with Rust came with its own set of challenges anyone considering a similar approach should know about.
 
@@ -223,11 +231,29 @@ _Collaboration Challenges_: Finding engineers within the team with Rust experien
 
 Despite these challenges, we're still convinced Rust was the right call for our specific use case. The benefits in production have far outweighed the development difficulties.
 
-<span id="etl">4. A Homemade Cloud-Native ETL Pipeline</span>
+**<span id="etl">4. A Homemade Cloud-Native ETL Pipeline</span>**
 
-Our ETL pipeline runs smoothly on AWS infrastructure. Here's how it works:
+Here what we had in mind for our ETL pipeline:
 
-<span id="rust-diesel-pagination">4.1 Rust + Diesel for Postgres</span>
+<div class="mermaid">
+flowchart TD;
+RustProgram[Rust Program] -->|Reads| PostgresRDS[PostgreSQL RDS];
+RustProgram -->|Calculates & Aggregates| S3ParquetFiles[S3 Parquet Files];
+RustProgram -->|Updates & Starts| AWS_GLUE[AWS Glue Crawler];
+AWS_GLUE[AWS Glue Crawler]-->|Crawls & Creates Schema| S3ParquetFiles[S3 Parquet Files];
+S3ParquetFiles[S3 Parquet Files] -->|Tables via Glue Schema| AWSAthena[AWS Athena];
+AWSAthena -->|Used in| Reports[Reports];
+
+    %% Adding styles for clarity
+    classDef process fill:#f9f,stroke:#333,stroke-width:2px;
+    class RustProgram,PostgresRDS,S3ParquetFiles,AWS_GLUE,AWSAthena,Reports process;
+</div>
+
+Instead of performing everything within Postgres, we built our ETL pipeline with Rust, and it runs smoothly on AWS infrastructure. 
+The full code (condenced and without many specific tables is [**here**](https://github.com/kraftaa/dracula))
+Here's how it works:
+
+**<span id="rust-diesel-pagination">4.1 Rust + Diesel for Postgres</span>**
 
 To handle large datasets from Postgres, we use Diesel, a Rust ORM. Diesel lets us read and stream queries efficiently, grabbing data in manageable chunks. This keeps memory usage down and prevents timeouts when processing huge datasets.
 
@@ -257,7 +283,7 @@ while let Some(chunks) = chunk_stream.next().await {
 This function fetches the table in batches and processes each batch as it goes. The approach prevents us from loading the entire dataset into memory at once, which would be a problem with very large tables.
 Diesel also provides strong type checking between our Rust code and the database schema:
 ```rust
-// dracula_pg_schemas/src/tables/currencies_tl.rs for the table
+// dracula_schemas/src/tables/currencies_tl.rs for the table
 table! {
     currencies (id) {
         id -> Int4,
@@ -276,7 +302,7 @@ table! {
 
 // Our model must match this schema
 ```rust
-// dracula_pg_schemas/src/models/currencies.rs for the struct
+// dracula_schemas/src/models/currencies.rs for the struct
 use bigdecimal::BigDecimal;
 use chrono::NaiveDateTime;
 
@@ -297,7 +323,7 @@ pub struct Currency {
 
 If there's a mismatch between our Rust struct and the database schema, the compilation fails, preventing runtime errors.
 
-<span id="rust-type-safety">4.2 Rust's Type Safety in the ETL Process</span>
+**<span id="rust-type-safety">4.2 Rust's Type Safety in the ETL Process</span>**
 
 Rust's type system is a great help for ensuring data integrity throughout the pipeline. From fetching data from Postgres to writing it into Parquet, we validate data structures at compile-time, making sure each step is correct before the pipeline even runs.
 
@@ -357,7 +383,7 @@ pub fn currencies(pg_uri: &str) -> (String, i64) {
 
 The compiler ensures that every field is properly accounted for. If we change the structure of OrderParquet, we'll get compile-time errors in all the places that create or use that struct, ensuring we don't miss any updates.
 
-<span id="s3-parquet">4.3 S3 Integration and Parquet Output</span>
+**<span id="s3-parquet">4.3 S3 Integration and Parquet Output</span>**
 
 The final step in the pipeline involves writing transformed data to AWS S3 in Parquet format. We use the parquet and aws-sdk-s3 crates in Rust to do this efficiently.
 
@@ -422,11 +448,11 @@ required INT32 order_month;
 ```
 This approach lets us efficiently write data to Parquet format and upload it directly to S3 without having to write temporary files to disk.
 
-<span id="reflecting">5. Reflecting on the Project: What Went Right and What Didn't</span>
+**<span id="reflecting">5. Reflecting on the Project: What Went Right and What Didn't</span>**
 
 Looking back, the project had its share of wins and challenges.
 
-<span id="rust-versions">5.1 Rust Versioning Challenges</span>
+**<span id="rust-versions">5.1 Rust Versioning Challenges</span>**
 
 One major headache was versioning. We couldn't upgrade to the latest stable Rust version because of compatibility issues with dependencies. This meant we couldn't use certain advanced features, which slowed down development at times.
 We were stuck on Rust 1.69 for over a year due to significant changes in many core packages. Upgrading to 1.80 would have required substantial effort, and since we didn’t plan to support the project long-term, we chose to remain on 1.69.  This prevented us from using a bunch of modern Rust features, including:
@@ -436,10 +462,10 @@ We were stuck on Rust 1.69 for over a year due to significant changes in many co
 - Stabilized std::sync::Mutex::unlock: A method to explicitly unlock a Mutex without dropping it.
 - Various syntax improvements and standard library additions.
 
-[//]: # (If we'd known about these versioning challenges in advance, we might have made different architectural decisions or put more effort into maintaining our own forks of critical dependencies.)
+If we'd known about these versioning challenges in advance, we might have made different architectural decisions or put more effort into maintaining our own forks of critical dependencies.
 
 
-<span id="orm-pros-cons">5.2 The Pros and Cons of Diesel ORM</span>
+**<span id="orm-pros-cons">5.2 The Pros and Cons of Diesel ORM</span>**
 
 Diesel was mostly a great choice, but its automatic schema generation sometimes caused issues, pulling unnecessary columns from Postgres. We worked around this by defining smaller Diesel schemas, making sure only the required data was fetched.
 
@@ -468,7 +494,7 @@ status -> Text,
 
 This approach improved query performance by reducing the amount of data transferred from the database, but it meant we had to manually maintain things whenever the database schema changed.
 
-<span id="operational-complexity">5.3 Operational Complexity with a Homemade ETL</span>
+**<span id="operational-complexity">5.3 Operational Complexity with a Homemade ETL</span>**
 
 While building our own ETL pipeline gave us flexibility, it definitely came with more maintenance overhead compared to managed services like dbt or Airflow. That said, the trade-off for performance and customizability made it worthwhile.
 
@@ -482,11 +508,11 @@ _Error Handling and Retries_: We built custom retry logic for various failure sc
 
 Despite these challenges, the performance and reliability benefits justified the extra operational work. Our ETL pipeline consistently processes millions of records daily with minimal resource usage and excellent stability.
 
-<span id="parallelism">6. Parallelism and Task Management</span>
+**<span id="parallelism">6. Parallelism and Task Management</span>**
 
 One area where Rust really shines is parallel data processing. Our ETL pipeline needs to handle large volumes of data efficiently, and Rust's concurrency model helps us do this without the complexity and overhead of frameworks like Spark.
 
-<span id="parallel-tokio">6.1 Parallel Data Processing with Tokio</span>
+**<span id="parallel-tokio">6.1 Parallel Data Processing with Tokio</span>**
 
 We use Tokio, an asynchronous runtime for Rust, to process data in parallel:
 
@@ -516,7 +542,7 @@ transform_orders(chunk)
 ```
 This approach lets us efficiently use multiple CPU cores without the headache of manually managing threads. The buffer_unordered method ensures we don't overwhelm the system by limiting the number of concurrent tasks.
 
-<span id="memory-management">6.2 Memory Management Considerations</span>
+**<span id="memory-management">6.2 Memory Management Considerations</span>**
 
 When you're processing large datasets, memory management becomes super important. Rust's ownership model helps us control memory usage precisely:
 ```rust
@@ -542,11 +568,11 @@ let total_records = get_total_record_count(connection)?;
 ```
 This pattern ensures that we only keep a small portion of the dataset in memory at any given time, allowing us to process arbitrarily large datasets with constant memory usage.
 
-<span id="complex-types">7. Handling Complex Data Types</span>
+**<span id="complex-types">7. Handling Complex Data Types</span>**
 
 Real-world data is messy, and any ETL system needs to handle all sorts of complex data types. Our Rust ETL pipeline handles this really well thanks to Rust's rich type system.
 
-<span id="decimal-finance">7.1 Decimal Handling for Financial Data</span>
+**<span id="decimal-finance">7.1 Decimal Handling for Financial Data</span>**
 
 One challenge we faced was handling financial data, which requires decimal precision. Using floating-point numbers for currency is asking for trouble due to precision issues. Rust's ecosystem provides great solutions:
 ```rust
@@ -585,11 +611,11 @@ DateTime::<Utc>::from_utc(timestamp, Utc).to_rfc3339()
 ```
 The chrono crate gives us comprehensive datetime handling capabilities, letting us parse, manipulate, and format dates and times consistently across our pipeline.
 
-<span id="monitoring">8. Monitoring and Observability</span>
+**<span id="monitoring">8. Monitoring and Observability</span>**
 
 A production ETL pipeline needs solid monitoring and observability. Our Rust-based approach includes comprehensive telemetry.
 
-<span id="logging">8.1 Structured Logging</span>
+**<span id="logging">8.1 Structured Logging</span>**
 
 We use the tracing crate for structured logging throughout our pipeline:
 ```rust
@@ -616,7 +642,7 @@ let _guard = span.enter();
 ```
 This approach gives us detailed insights into how the pipeline is running, with structured metadata that can be analyzed programmatically.
 
-<span id="metrics">8.2 Metrics and Alerting</span>
+**<span id="metrics">8.2 Metrics and Alerting</span>**
 
 We also collect performance metrics to keep an eye on the health of our pipeline:
 ```rust
@@ -641,11 +667,11 @@ counter!("records.processed").increment(batch_size as u64);
 ```
 These metrics go to CloudWatch, where we set up alerts for various conditions like processing delays, error rates, and abnormal data volumes.
 
-<span id="conclusion">9. Conclusion: Lessons Learned and Moving Forward</span>
+**<span id="conclusion">9. Conclusion: Lessons Learned and Moving Forward</span>**
 
 Looking back, this project was a great experience. We built a high-performance, secure, and type-safe ETL pipeline that runs efficiently in the cloud. But we learned that there's no perfect solution for everyone. The choice of tools often comes down to balancing complexity against functionality.
 
-<span id="takeways">9.1 Key Takeaways</span>
+**<span id="takeways">9.1 Key Takeaways</span>**
 
 From our time building and maintaining this ETL pipeline, several important lessons stood out:
 
@@ -657,7 +683,7 @@ _Operational Complexity is Real_: Building custom solutions requires significant
 
 _Dependency Management is Critical_: Being stuck on older versions of Rust due to dependency issues created real friction for development.
 
-<span id="future">9.2 Future Directions</span>
+**<span id="future">9.2 Future Directions</span>**
 
 Going forward, we're exploring new ETL options, including PostgreSQL and dbt, as our infrastructure and expertise have evolved. While the Rust-based ETL pipeline was a highly educational and satisfying project, we’ve decided to transition to more modern tools that align with our current needs and the advancements in the data engineering landscape.
 
