@@ -44,15 +44,17 @@ tags: [Rust, AWS, S3, Postgres]
 
 Hey there! 
 
-Today I'm going to walk you through a cloud-native ETL pipeline we built using Rust. 
-This project was very interesting both for the challenges we faced and the stuff we learned.
+This is a walkthrough of a cloud-native ETL pipeline we built using Rust.
+It was a fascinating project, both for the challenges we faced and the lessons we learned along the way.
+It was originally started by my colleague and Rust wizard [**Xavier Lange**](https://github.com/xrl).
 We were dealing with everything from Postgres integration to writing Parquet files on AWS S3, with a focus on performance, type safety, and keeping operational headaches to a minimum. 
 
 Let's break it down.
 
 <strong><span id="problem">1. Problem</span></strong>
 
-This whole thing started a few years back when we needed a solution for company reporting without an established ETL process. Our production data lived in a Postgres RDS database, but pulling reports directly from the primary instance wasn't going to work - it would've put extra load on the main app and required additional roles to handle live production data.
+This whole thing started a few years back when we needed a solution for company reporting without an established ETL process.
+Our production data lived in a Postgres RDS database, but pulling reports directly from the primary instance wasn't going to work - it would've put extra load on the main app and required additional roles to handle live production data.
 Plus, we needed to run complex calculations and aggregations, then store those processed results for reporting later. 
 Postgres is great for transactional workloads, but we hit some walls when it came to heavy computations and data enrichment, and we could not run ML computations on live data.
 And we didn't want to denormalize the tables by storing all the calculated fields in Postgres.
@@ -155,25 +157,7 @@ pub struct Currency {
   pub updated_at: Option<NaiveDateTime>,
 }
 ```
-This model allows us to pick up only the fields we need, without loading all the table. 
-
-[Placeholder:Click here for more details](#)
-
-<div id="hidden-description" style="display:none;">
-  <p>Placeholder: This is the hidden description that will appear when the link is clicked.</p>
-</div>
-
-<script>
-  document.querySelector('a[href="#"]').addEventListener('click', function(e) {
-    e.preventDefault();
-    var description = document.getElementById('hidden-description');
-    if (description.style.display === "none") {
-      description.style.display = "block";
-    } else {
-      description.style.display = "none";
-    }
-  });
-</script>
+This model allows us to pick up only the fields we need, without loading all the table.
 
 This definition does multiple things at once:
 
@@ -205,7 +189,7 @@ Working with Rust came with its own set of challenges anyone considering a simil
 
 Getting comfortable with its ownership and borrowing rules took some serious learning. Handling large data structures, managing memory efficiently and wrangling concurrency was sometimes tricky and challenging. But in the end, the performance and safety we got made those hardships worth it.
 
-Some specific pain points:
+Some specific expected pain points:
 
 _Steep Learning Curve_: It took our team months to fully wrap our heads around how to handle most types and the huge tables.
 
@@ -213,15 +197,9 @@ _Limited Library Ecosystem_: While growing fast, Rust's ecosystem for data proce
 
 _Compile Times_: Large Rust projects can be slow to compile, which hurt developer productivity. It also required different packages installation while running locally on Macos vs Kubernetes ubuntu pod.
 
-_Compiling for Different Environment_: Testing Rust project on macOS and deploying it to Ubuntu server not always looked the same. macOS uses Clang as the default C/C++ compiler, when on Ubuntu we had to install or configure GCC by ourselves.
-
 _Collaboration Challenges_: Finding engineers within the team with Rust experience is harder than finding engineers who know Python or Java.
 
-_Maintaining local database_: In order to be able automatically create table! macro definition and a struct we had to have local copy of the table though we didn't need the data in it.
-
-_Introducing changes_: As Rust can't create structs dynamically, each change in the database had to be addressed manually: if the column is removed from the table Rust panics because it's hardcoded in our model.
-
-Despite these challenges, we're still convinced Rust was the right choice for us. The benefits in production have far outweighed the development difficulties.
+We're still convinced Rust was the right choice for us. The benefits in production have far outweighed the development difficulties.
 
 **<span id="etl">4. A Homemade Cloud-Native ETL Pipeline</span>**
 
@@ -244,7 +222,7 @@ AWSAthena -->|Used in| Reports[Reports];
 Instead of performing everything within Postgres, we built our ETL pipeline with Rust, and it runs smoothly on AWS infrastructure.
 Our Rust project is called **Dracula** because it carefully sips production data without draining the system dry.
 
-The full code (condenced and without specific tables located [**here**](https://github.com/kraftaa/dracula)).
+The full code (condenced and without specific tables is located [**here**](https://github.com/kraftaa/dracula)).
 
 Here's how it works:
 
@@ -310,8 +288,21 @@ Using the _**diesel**_ _print-schema_ command, the schema for the specified tabl
 
 The _**diesel_ext**_ crate then was used to generate the Rust struct for that table, which was placed into the appropriate module.
 
-
 If there's a mismatch between our Rust struct and the database schema, the compilation fails, preventing runtime errors.
+
+We also started pagination big tables with Diesel using _offset_ and _limit_ and our own struct and trait [RecordIter](https://github.com/kraftaa/dracula/blob/main/dracula_tasks/src/tasks/page_iter.rs) but later switched to SQLX, because:
+
+_Async Support_
+- SQLx is fully async and works well with Rust’s async ecosystem (Tokio), allowing for non-blocking database queries.
+- Diesel, on the other hand, is synchronous (unless you use Diesel Async, which is still less mature).
+
+_Better Support for Dynamic Queries_
+- SQLx allows you to write raw SQL queries easily, making it simpler to implement flexible pagination logic.
+- Diesel relies on a strong type system and query builder, which can make complex pagination queries harder to construct.
+
+_Streaming Large Results_
+- SQLx supports database cursors and fetch() for efficient streaming of paginated results, avoiding the need to load everything into memory at once.
+- Diesel loads the entire result set into memory before paginating, which can be inefficient for large datasets.
 
 **<span id="rust-sqlx">4.2 Rust + SQLX for Postgres</span>**
 
@@ -655,6 +646,12 @@ _Parquet Support for different types_: When we created the program Parquet didn'
 
 _Rust support for keywords_: We have to add  #[sql_name = "type"] to the table! macro for columns named _type_ and rename them into _type__.
 
+_Compiling for Different Environment_: Testing Rust project on macOS and deploying it to Ubuntu server not always looked the same. macOS uses Clang as the default C/C++ compiler, when on Ubuntu we had to install or configure GCC by ourselves.
+
+_Maintaining local database_: In order to be able automatically create table! macro definition and a struct we had to have local copy of the table though we didn't need the data in it.
+
+_Introducing changes_: As Rust can't create structs dynamically, each change in the database had to be addressed manually: if the column is removed from the table Rust panics because it's hardcoded in our model.
+
 Despite these challenges, the performance and reliability benefits justified the extra operational work. Our ETL pipeline consistently processes millions of records daily with minimal resource usage and excellent stability.
 
 
@@ -697,3 +694,22 @@ The Rust-based ETL pipeline was a challenging but incredibly rewarding experienc
 Looking Ahead
 
 As the data engineering landscape continues to evolve, we’re staying open to new approaches and technologies. Our goal is to balance performance, reliability, and developer productivity while leveraging the best tools for the job. We hope sharing our experience helps others navigating similar challenges in their data engineering journeys.
+
+
+[Extra details to be added later](#)
+
+<div id="hidden-description" style="display:none;">
+  <p>this would be more info about ARC/RC/Mutex/runtimes</p>
+</div>
+
+<script>
+  document.querySelector('a[href="#"]').addEventListener('click', function(e) {
+    e.preventDefault();
+    var description = document.getElementById('hidden-description');
+    if (description.style.display === "none") {
+      description.style.display = "block";
+    } else {
+      description.style.display = "none";
+    }
+  });
+</script>
