@@ -41,23 +41,32 @@ Building a Cloud-Native ETL with Rust: A Retrospective
 
 
 
-In this post, I'll walk you through a cloud-native ETL pipeline built using Rust. Over the years, I've worked on various data engineering projects, and this one stands out due to the challenges and decisions we made. From integrating with Postgres to writing to Parquet files on AWS S3, this project centered around performance, type safety, and minimizing operational complexity. Let's break down the major considerations and how we arrived at our architecture.
+In this post, I'll walk you through a cloud-native ETL pipeline built using Rust. Over the years, I've worked on various data engineering projects, and this one stands out due to the challenges and decisions we made. 
+From integrating with Postgres to writing to Parquet files on AWS S3, this project centered around performance, type safety, and minimizing operational complexity. Let's break down the major considerations and how we arrived at our architecture.
 
-[//]: # (## 1. Data Warehouses )
+## Problem
+
+This project began several years ago as a solution for providing data for company reporting in the absence of an established ETL process. The production data resided in a Postgres RDS database, but generating reports directly from
+the primary instance was not considered as an option. Doing so would have imposed additional load on the main application and required additional roles to handle live production data.
+
+Moreover, we needed to perform complex computations and aggregations and store the processed results for subsequent use in reporting. While Postgres was great for handling transactional workloads, we faced some challenges when tasked with heavy computations and data enrichment.
+And we didn't want to store all the calculated fields in Postgres which would denormalize the tables.
+
+
 ## <span id="data-warehouses">1. Data Warehouses</span>
    
-   Choosing the Right Backend
+   **_Choosing the Right Backend_**
    When building a cloud-native ETL pipeline, choosing the right data warehouse to store and process your data is crucial. Here are the key factors we focused on:
 
 ###  <span id="security">1.1. Security</span>
 
-   Security is paramount in our design. We ensure that all data transfers are encrypted and adhere to industry-standard security practices for both storage and access control. Using cloud-native solutions like AWS S3 helps us integrate best practices for encryption and access management seamlessly.
-   For our ETL pipeline, we implement security measures at multiple levels:
+Security is paramount in our design. We ensure that all data transfers are encrypted and adhere to industry-standard security practices for both storage and access control. Using cloud-native solutions like AWS S3 helps us integrate best practices for encryption and access management seamlessly.
+For our ETL pipeline, we implement security measures at multiple levels:
 
-Transport Layer Security: All data transferred between our ETL components and storage systems (Postgres, S3) uses TLS encryption.
-IAM Role-Based Access: We leverage AWS IAM roles with the principle of least privilege, ensuring components only have access to the resources they absolutely need.
-Data Encryption: We implement server-side encryption for data at rest in S3, using AWS KMS to manage encryption keys.
-Secrets Management: Database credentials and API keys are stored in AWS Secrets Manager, never hardcoded.
+**Transport Layer Security:** All data transferred between our ETL components and storage systems (Postgres, S3) uses TLS encryption.
+**IAM Role-Based Access:** We leverage AWS IAM roles with the principle of least privilege, ensuring components only have access to the resources they absolutely need.
+**Data Encryption:** We implement server-side encryption for data at rest in S3, using AWS KMS to manage encryption keys.
+**Secrets Management:** Database credentials and API keys are stored in Kubernetes secrets.
 
 These measures combine to create a defense-in-depth approach to securing our data pipeline.
 

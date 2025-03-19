@@ -2,7 +2,7 @@
 layout: post
 title: "Building a Cloud-Native ETL with Rust: A Retrospective"
 date: 2024-12-17
-img: rust3.png
+img: rustacean-flat-happy.svg
 tags: [Rust, AWS, S3, Postgres]
 ---
 
@@ -15,33 +15,32 @@ tags: [Rust, AWS, S3, Postgres]
     - [2.3 Operational Complexity](#complexity)
 - [3. Why Rust](#why-rust)
     - [3.1. The Context and Alternatives](#context)
-    - [3.2 Type Safety All the Way Down](#type-safety)
+    - [3.2 Type Safety](#type-safety)
     - [3.3 Performance Considerations](#preformance-rust)
     - [3.4 The Challenges of Working with Rust](#challenges-rust)
 - [4. A Homemade Cloud-Native ETL Pipeline](#etl)
-    - [4.1 Rust + Diesel for Postgres Pagination](#rust-diesel-pagination)
-    - [4.2 Rust's Type Safety in the ETL Process](#rust-type-safety)
-    - [4.3 S3 Integration and Parquet Output](#s3-parquet)
-    - [4.3 S3 Integration and Parquet Output](#s3-parquet)
-- [5. Reflecting on the Project: What Went Right and What Didn't](#reflecting)
-    - [5.1 Rust Versioning Challenges](#rust-versions)
-    - [5.2 The Pros and Cons of Diesel ORM](#orm-pros-cons)
-    - [5.3 Operational Complexity with a Homemade ETL](#operational-complexity)
-- [6. Parallelism and Task Management](#parallelism)
-    - [6.1 Asynchronous Data Processing with Tokio](#asynchronous-tokio)
-    - [6.2 Parallel Data Processing with Rayon](#parallel-rayon)
-    - [6.3 Memory Management Considerations](#memory-management)
-- [7. Handling Complex Data Types](#complex-types)
-    - [7.1 Decimal Handling for Financial Data](#decimal-finance)
-    - [7.2 Date and Time Handling](#date-time)
-- [8. Monitoring and Observability](#monitoring)
-    - [8.1 Structured Logging](#logging)
-    - [8.2 Metrics and Alerting](#logging)
+    - [4.1 Rust + Diesel for Postgres](#rust-diesel)
+    - [4.2 Rust + SQLX for Postgres](#rust-sqlx)
+    - [4.3 Rust's Type Safety in the ETL Process](#rust-type-safety)
+    - [4.4 S3 Integration and Parquet Output](#s3-parquet)
+- [5. Parallelism and Task Management](#parallelism)
+    - [5.1 Asynchronous Data Processing with Tokio](#asynchronous-tokio)
+    - [5.2 Parallel Data Processing with Rayon](#parallel-rayon)
+    - [5.3 Memory Management Considerations](#memory-management)
+- [6. Handling Complex Data Types](#complex-types)
+    - [6.1 Decimal Handling for Financial Data](#decimal-finance)
+    - [6.2 Date and Time Handling](#date-time)
+    - [6.3 Jsonb and Array](#date-jsonb-array)
+- [7. Monitoring and Observability](#monitoring)
+    - [7.1 Structured Logging](#logging)
+    - [7.2 Metrics and Alerting](#logging)
+- [8. Reflecting on the Project: What Went Right and What Didn't](#reflecting)
+  - [8.1 Rust Versioning Challenges](#rust-versions)
+  - [8.2 The Pros and Cons of Diesel ORM](#orm-pros-cons)
+  - [8.3 Operational Complexity with a Homemade ETL](#operational-complexity)
 - [9. Conclusion: Lessons Learned and Moving Forward](#conclusion)
-    - [9.1 Key Takeaways](#takeways)
-    - [9.2 Future Directions](#future)
-
-[//]: # (We named our project Dracula with the idea that it would ‘sip’ data from Postgres efficiently—extracting what it needs without draining resources or causing a crash)
+  - [9.1 Key Takeaways](#takeways)
+  - [9.2 Future Directions](#future)
 
 Hey there! 
 
@@ -89,6 +88,8 @@ Our performance optimization definition includes:
 _Efficient Streaming_: Streaming a data in chunks for the big tables.
 
 _Parallel Processing_: Rust's concurrency model lets us process multiple chunks of data at the same time.
+
+_Asynchronous Processing_: Rust's tokio run time model lets us process tasks asynchronously.
 
 _Columnar Data Format_: Using Parquet as our output format dramatically improves storage efficiency and query performance for downstream analytics.
 
@@ -141,7 +142,6 @@ Check out how we define our data models in Rust:
 use bigdecimal::BigDecimal;
 use chrono::NaiveDateTime;
 
-#[allow(dead_code)]
 #[derive(Queryable, Debug, sqlx::FromRow)]
 pub struct Currency {
   pub id: i32,
@@ -207,15 +207,15 @@ Getting comfortable with its ownership and borrowing rules took some serious lea
 
 Some specific pain points:
 
-_Steep Learning Curve_: It took our team months to fully wrap our heads around how to handle most types and huge tables.
+_Steep Learning Curve_: It took our team months to fully wrap our heads around how to handle most types and the huge tables.
 
 _Limited Library Ecosystem_: While growing fast, Rust's ecosystem for data processing wasn't as mature as Python's or Java's when we started.
 
 _Compile Times_: Large Rust projects can be slow to compile, which hurt developer productivity. It also required different packages installation while running locally on Macos vs Kubernetes ubuntu pod.
 
-_Compiling for Different Environment_: Testing Rust project on Macos and deploying it to Ubuntu server not always looked the same.
+_Compiling for Different Environment_: Testing Rust project on macOS and deploying it to Ubuntu server not always looked the same. macOS uses Clang as the default C/C++ compiler, when on Ubuntu we had to install or configure GCC by ourselves.
 
-_Collaboration Challenges_: Finding engineers within the team with Rust experience was harder than finding engineers who know Python or Java.
+_Collaboration Challenges_: Finding engineers within the team with Rust experience is harder than finding engineers who know Python or Java.
 
 _Maintaining local database_: In order to be able automatically create table! macro definition and a struct we had to have local copy of the table though we didn't need the data in it.
 
@@ -248,34 +248,18 @@ The full code (condenced and without specific tables located [**here**](https://
 
 Here's how it works:
 
-**<span id="rust-diesel-pagination">4.1 Rust + Diesel for Postgres</span>**
+**<span id="rust-diesel">4.1 Rust + Diesel for Postgres</span>**
 
-To handle large datasets from Postgres, we use Diesel, a Rust ORM. Diesel lets us read and stream queries efficiently, grabbing data in manageable chunks. This keeps memory usage down and prevents timeouts when processing huge datasets.
-
-Here's a more complete example of how we implement streaming with Diesel:
+For mapping structs and tables and for reading small tables we are using Diesel, synchronous Rust ORM.
 
 ```rust
-use super::prelude::*;
-pub use futures_util::stream::StreamExt;
-use parquet::record::RecordWriter;
-pub use sqlx::postgres::PgPool;
+pub use diesel::pg::PgConnection;
 
-let pool = PgPool::connect(pg_uri).await?;
-let wpc = sqlx::query_as::<sqlx::Postgres, WPCStreamRecord>(&query);
+pub fn taxes(pg_uri: &str) -> (String, i64) {
+    let pgconn = PgConnection::establish(pg_uri).unwrap();
 
-let wpc_stream = wpc.fetch(&pool);
-
-let mut chunk_stream = wpc_stream.map(|fs| fs.unwrap()).chunks(5000);
-while let Some(chunks) = chunk_stream.next().await {
-    let mut row_group = pfile.next_row_group().unwrap();
-    (&chunks[..])
-    .write_to_row_group(&mut row_group)
-    .expect("can't 'write_to_row_group' ...");
-    pfile.close_row_group(row_group).unwrap();
-}
+    let taxes = taxes_dsl::taxes.load::<Tax>(&pgconn).unwrap();
 ```
-
-This function fetches the table in batches and processes each batch as it goes. The approach prevents us from loading the entire dataset into memory at once, which would be a problem with very large tables.
 
 Diesel also provides strong type checking between our Rust code and the database schema:
 ```rust
@@ -302,7 +286,6 @@ table! {
 use bigdecimal::BigDecimal;
 use chrono::NaiveDateTime;
 
-#[allow(dead_code)]
 #[derive(Queryable, Debug, sqlx::FromRow)]
 pub struct Currency {
   pub id: i32,
@@ -317,9 +300,9 @@ pub struct Currency {
 }
 ```
 
-The process of creating a struct was automated through a _**Makefile**_ [command](https://github.com/kraftaa/dracula/blob/a0ab6e859af0ef8bf7c71dbc8a837d49ea76938a/Makefile#L162). Here's how it worked:
+The process of creating a struct was automated through a _**Makefile**_ [command](https://github.com/kraftaa/dracula/blob/a0ab6e859af0ef8bf7c71dbc8a837d49ea76938a/Makefile#L162). Here's how it works:
 
-The **_create-model_** target in the _**Makefile**_ generated the necessary Rust files for each table. It began by creating a _diesel.toml_ file for the table, which defined how the schema was printed.
+The **_create-model_** target in the _**Makefile**_ generates the necessary Rust files for each table. It begins by creating a _diesel.toml_ file for the table, which defines how the schema is printed.
 
 The command then added the module for the table to the various locations in the project, including _**mod.rs**_ files for organizing the project’s code structure.
 
@@ -330,8 +313,39 @@ The _**diesel_ext**_ crate then was used to generate the Rust struct for that ta
 
 If there's a mismatch between our Rust struct and the database schema, the compilation fails, preventing runtime errors.
 
+**<span id="rust-sqlx">4.2 Rust + SQLX for Postgres</span>**
 
-**<span id="rust-type-safety">4.2 Rust's Type Safety in the ETL Process</span>**
+To handle large datasets from Postgres, we use SQLX (asynchronous SQL queries). It lets us read and stream queries efficiently, grabbing data in manageable chunks. This keeps memory usage down and prevents timeouts when processing huge datasets.
+We also don't need to define table! macro and structs for the table, SQLX can define the struct to match the results of the SQL query. We still have some tables & structs for streaming tables, as they were defined before we figured out SQLX and were dealing with the pagination.
+
+
+Here's a more complete example of how we implement streaming with SQLX:
+
+```rust
+use super::prelude::*;
+pub use futures_util::stream::StreamExt;
+use parquet::record::RecordWriter;
+pub use sqlx::postgres::PgPool;
+
+let pool = PgPool::connect(pg_uri).await?;
+let wpc = sqlx::query_as::<sqlx::Postgres, WPCStreamRecord>(&query);
+
+let wpc_stream = wpc.fetch(&pool);
+
+let mut chunk_stream = wpc_stream.map(|fs| fs.unwrap()).chunks(5000);
+while let Some(chunks) = chunk_stream.next().await {
+    let mut row_group = pfile.next_row_group().unwrap();
+    (&chunks[..])
+      .write_to_row_group(&mut row_group)
+      .expect("can't 'write_to_row_group' ...");
+    pfile.close_row_group(row_group).unwrap();
+}
+```
+
+This function fetches the table in batches and processes each batch as it goes. The approach prevents us from loading the entire dataset into memory at once, which would be a problem with very large tables.
+
+
+**<span id="rust-type-safety">4.3 Rust's Type Safety in the ETL Process</span>**
 
 Rust's type system is a great help for ensuring data integrity throughout the pipeline. From fetching data from Postgres to writing it into Parquet, we validate data structures at compile-time, making sure each step is correct before the pipeline even runs.
 
@@ -391,9 +405,9 @@ pub fn currencies(pg_uri: &str) -> (String, i64) {
 
 The compiler ensures that every field is properly accounted for. If we change the structure of _CurrencyRecord_, we'll get compile-time errors in all the places that create or use that struct, ensuring we don't miss any updates.
 
-**<span id="s3-parquet">4.3 S3 Integration and Parquet Output</span>**
+**<span id="s3-parquet">4.4 S3 Integration and Parquet Output</span>**
 
-The final step in the pipeline involves writing transformed data to AWS S3 in Parquet format. We use the parquet and aws-sdk-s3 crates in Rust to do this efficiently.
+The final step in the pipeline involves writing transformed data to AWS S3 in Parquet format. We use the parquet and _aws-sdk-s3_ crates in Rust to do this efficiently.
 
 Here's how we implement this part of the pipeline:
 
@@ -439,76 +453,11 @@ pub async fn upload(
 
 This approach lets us efficiently write data to Parquet format and upload it directly to S3.
 
-**<span id="reflecting">5. Reflecting on the Project: What Went Right and What Didn't</span>**
-
-Looking back, the project had its share of wins and challenges.
-
-**<span id="rust-versions">5.1 Rust Versioning Challenges</span>**
-
-One major headache was versioning. We couldn't upgrade to the latest stable Rust version because of compatibility issues with dependencies. This meant we couldn't use certain advanced features, which slowed down development at times.
-We were stuck on Rust 1.69 for over two years due to significant changes in many core packages. Upgrading to 1.80 would have required substantial effort, and since we don’t plan to support the project long-term, we chose to remain on 1.69.  This prevented us from using a bunch of modern Rust features, including:
-
-- #[derive(Default)] on Enums:
-- Improved Error Messages for Borrow Checker: More user-friendly error messages for common borrow-checker issues.
-- Stabilized _std::sync::Mutex::unlock_: A method to explicitly unlock a Mutex without dropping it.
-- Various syntax improvements and standard library additions.
-
-If we'd known about these versioning challenges in advance, we might have made different architectural decisions or put more effort into maintaining our own forks of critical dependencies or simplifying most of the methods.
-
-
-**<span id="orm-pros-cons">5.2 The Pros and Cons of Diesel ORM</span>**
-
-Diesel was mostly a great choice, but its automatic schema generation sometimes caused issues, pulling unnecessary columns from Postgres. We worked around this by defining smaller Diesel schemas, making sure only the required data was fetched.
-
-The benefits of Diesel included:
-
-- Strong type safety between database and code
-- Excellent query performance
-- Compile-time SQL verification
-
-However, we ran into several challenges:
-- The auto-generated schema pulled ALL columns from tables, resulting in inefficient queries
-- Complex joins and advanced PostgreSQL features sometimes required dropping down to raw SQL
-
-Our solution was to create custom, smaller schema definitions that only included the columns we needed:
-
-```rust
-table! {
-  notes (id) {
-    id -> Int8,
-    title -> Nullable<Text>,
-    body -> Nullable<Text>,
-    status -> Nullable<Varchar>,
-    // Note: we could omit columns we don't need
-  }
-}
-```
-
-This approach improved query performance by reducing the amount of data transferred from the database, but it meant we had to manually maintain things whenever the database schema changed.
-
-**<span id="operational-complexity">5.3 Operational Complexity with a Homemade ETL</span>**
-
-While building our own ETL pipeline gave us flexibility, it definitely came with more maintenance overhead compared to managed services like dbt or Airflow. That said, the trade-off for performance and customizability made it worthwhile.
-
-Some specific operational challenges we faced:
-
-_Deployment Complexity_: We had to build our own CI/CD pipeline using our custom images to handle building and deploying Rust binaries.
-
-_Monitoring and Observability_: Without built-in monitoring, we had to use logs and later prometheus for checking metrics.
-
-_Error Handling and Retries_: We built custom retry logic for various failure scenarios.
-
-_Parquet Support for different types_: When we created the program Parquet didn't support writing uuid, bool, so we had to convert them into String. Parquet still doesn't support Array and Json writing and unlikely would. Which implies we need to parse back the data in our views.
-
-_Rust support for keywords_: We have to add  #[sql_name = "type"] to the table! macro for columns named _type_ and rename them into _type__.
-
-Despite these challenges, the performance and reliability benefits justified the extra operational work. Our ETL pipeline consistently processes millions of records daily with minimal resource usage and excellent stability.
-
-**<span id="parallelism">6. Parallelism and Task Management</span>**
+**<span id="parallelism">5. Parallelism and Task Management</span>**
 
 One area where Rust really great at is parallel data processing. Our ETL pipeline needs to handle large volumes of data efficiently, and Rust's concurrency model helps us do this without the complexity and overhead of frameworks like Spark.
 
-**<span id="asynchronous-tokio">6.1 Asynchronous Data Processing with Tokio</span>**
+**<span id="asynchronous-tokio">5.1 Asynchronous Data Processing with Tokio</span>**
 
 We use Tokio, an asynchronous runtime for Rust to run tasks concurrently in Tokio runtime: 
 
@@ -521,7 +470,7 @@ tokio::task::spawn(async move {
 ```
 This approach lets us efficiently use multiple CPU cores without the headache of manually managing threads.
 
-**<span id="parallel-rayon">6.2 Parallel Data Processing with Rayon</span>**
+**<span id="parallel-rayon">5.2 Parallel Data Processing with Rayon</span>**
 
 We set up several threads with Rayon ThreadBuilder to expedite data processing:
 ```rust
@@ -542,7 +491,7 @@ Where _par_iter()_ enables parallel iteration over purchase_orders, distributing
 Each thread processes part of the collection independently (e.g., applying the _.filter()_ in parallel).
 Rayon's thread pool manages execution, using up to _num_threads(2)_ threads because of our _ThreadPoolBuilder_ setup.
 
-**<span id="memory-management">6.3 Memory Management Considerations</span>**
+**<span id="memory-management">5.3 Memory Management Considerations</span>**
 
 When you're processing large datasets, memory management becomes super important. Rust's ownership model helps us control memory usage precisely:
 ```rust
@@ -553,11 +502,11 @@ while let Some(chunks) = chunk_stream.next().await {
 ```
 We only load and process a small batch (5000 records) at a time, preventing excessive memory consumption. This approach enables handling arbitrarily large datasets while maintaining near-constant memory usage—assuming we don’t retain previous batches. Because each batch is processed and then dropped before fetching the next one, memory usage remains stable rather than growing indefinitely.
 
-**<span id="complex-types">7. Handling Complex Data Types</span>**
+**<span id="complex-types">6. Handling Complex Data Types</span>**
 
 Real data is sometimes messy, and any ETL system needs to handle all sorts of complex data types. Our Rust ETL pipeline handles this really well thanks to Rust's rich type system.
 
-**<span id="decimal-finance">7.1 Decimal Handling for Financial Data</span>**
+**<span id="decimal-finance">6.1 Decimal Handling for Financial Data</span>**
 
 One challenge we faced was handling financial data, which requires decimal precision. Using floating-point numbers for currency is asking for trouble due to precision issues. Rust's ecosystem provides great solutions:
 ```rust
@@ -586,7 +535,7 @@ let records: Vec<CurrencyRecord> = currencies
     .expect("big decimal rate"),
 ```
 
-<span id="date-time">7.2 Date and Time Handling</span>
+<span id="date-time">6.2 Date and Time Handling</span>
 
 Another common challenge in ETL pipelines is handling dates and times across different systems:
 ```rust
@@ -601,11 +550,24 @@ NaiveDate::from_ymd_opt(year, *month, last_day);
 ```
 The chrono crate gives us comprehensive datetime handling capabilities, letting us parse, manipulate, and format dates and times consistently across our pipeline.
 
-**<span id="monitoring">8. Monitoring and Observability</span>**
+**<span id="date-jsonb-array">6.3 Jsonb and Array</span>**
+
+Many of our descriptive fields were stored in PostgreSQL using jsonb or ARRAY formats.
+While we were able to load and work with both jsonb and ARRAY in Rust, using:
+
+```rust
+pub justifications: Option<Vec<String>>,
+pub options: Option<serde_json::Value>,
+```
+
+we encountered challenges when writing these columns to Parquet while preserving their original types.
+To store them in Parquet, we had to convert them into String, effectively storing the entire ARRAY or jsonb blob as a serialized string. This introduced an additional parsing step when querying the data, impacting performance and usability.
+
+**<span id="monitoring">7. Monitoring and Observability</span>**
 
 A production ETL pipeline needs solid monitoring and observability. Our Rust-based approach provided us great tools to monitor the process.
 
-**<span id="logging">8.1 Structured Logging</span>**
+**<span id="logging">7.1 Structured Logging</span>**
 
 We use the tracing crate for structured logging throughout our pipeline:
 ```rust
@@ -624,9 +586,76 @@ info!("file {} has been uploaded", file_name);
 ```
 This approach gives us detailed insights into how the pipeline is running, with structured metadata that can be analyzed programmatically.
 
-**<span id="metrics">8.2 Metrics and Alerting</span>**
+**<span id="metrics">7.2 Metrics and Alerting</span>**
 
 We also used to collect performance metrics with Prometheys an eye on the health of our pipeline, but later got rid of it as didn't have time to analyze it.
+
+**<span id="reflecting">8. Reflecting on the Project: What Went Right and What Didn't</span>**
+
+Looking back, the project had its share of wins and challenges.
+
+**<span id="rust-versions">8.1 Rust Versioning Challenges</span>**
+
+One major headache was versioning. We couldn't upgrade to the latest stable Rust version because of compatibility issues with dependencies. This meant we couldn't use certain advanced features, which slowed down development at times.
+We were stuck on Rust 1.69 for over two years due to significant changes in many core packages. Upgrading to 1.80 would have required substantial effort, and since we don’t plan to support the project long-term, we chose to remain on 1.69.  This prevented us from using a bunch of modern Rust features, including:
+
+- #[derive(Default)] on Enums:
+- Improved Error Messages for Borrow Checker: More user-friendly error messages for common borrow-checker issues.
+- Stabilized _std::sync::Mutex::unlock_: A method to explicitly unlock a Mutex without dropping it.
+- Various syntax improvements and standard library additions.
+
+If we'd known about these versioning challenges in advance, we might have made different architectural decisions or put more effort into maintaining our own forks of critical dependencies or simplifying most of the methods.
+
+
+**<span id="orm-pros-cons">8.2 The Pros and Cons of Diesel ORM</span>**
+
+Diesel was mostly a great choice, but its automatic schema generation sometimes caused issues, pulling unnecessary columns from Postgres. We worked around this by defining smaller Diesel schemas, making sure only the required data was fetched.
+
+The benefits of Diesel included:
+
+- Strong type safety between database and code
+- Excellent query performance
+- Compile-time SQL verification
+
+However, we ran into several challenges:
+- The auto-generated schema pulled ALL columns from tables, resulting in inefficient queries, so it needed to be manually adjusted.
+- Complex joins and advanced PostgreSQL features sometimes required dropping down to raw SQL
+
+Our solution was to create custom, smaller schema definitions that only included the columns we needed:
+
+```rust
+table! {
+  notes (id) {
+    id -> Int8,
+    title -> Nullable<Text>,
+    body -> Nullable<Text>,
+    status -> Nullable<Varchar>,
+    // Note: we could omit columns we don't need
+  }
+}
+```
+
+This approach improved query performance by reducing the amount of data transferred from the database, but it meant we had to manually maintain things whenever the database schema changed.
+
+**<span id="operational-complexity">8.3 Operational Complexity with a Homemade ETL</span>**
+
+While building our own ETL pipeline gave us flexibility, it definitely came with more maintenance overhead compared to managed services like dbt or Airflow. That said, the trade-off for performance and customizability made it worthwhile.
+
+Some specific operational challenges we faced:
+
+_Deployment Complexity_: We had to build our own CI/CD pipeline using our custom images to handle building and deploying Rust binaries.
+
+_Monitoring and Observability_: Without built-in monitoring, we had to use logs and later prometheus for checking metrics.
+
+_Error Handling and Retries_: We built custom retry logic for various failure scenarios.
+
+_Diesel Errors Description_: Sometimes Diesel’s errors description could be better. In case of table/struct having mismatched order or types the error was just a blob of all info with the comment required by a bound in diesel::RunQueryDsl::load, which wasn’t very useful and required digging into the data.
+
+_Parquet Support for different types_: When we created the program Parquet didn't support writing uuid, bool, so we had to convert them into String. Parquet still doesn't support Array and Json writing and unlikely would. Which implies we need to parse back the data in our views.
+
+_Rust support for keywords_: We have to add  #[sql_name = "type"] to the table! macro for columns named _type_ and rename them into _type__.
+
+Despite these challenges, the performance and reliability benefits justified the extra operational work. Our ETL pipeline consistently processes millions of records daily with minimal resource usage and excellent stability.
 
 
 **<span id="conclusion">9. Conclusion: Lessons Learned and Moving Forward</span>**
