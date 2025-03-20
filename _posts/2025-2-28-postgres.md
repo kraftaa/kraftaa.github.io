@@ -6,41 +6,179 @@ img: rustacean-flat-happy.svg
 tags: [Rust, AWS, S3, Postgres]
 ---
 
+<style>
+  .toc-sidebar {
+    position: fixed;
+    left: 20px; /*260px  Move TOC to the right of the sidebar */
+    top: 280px; /* 80px */
+    width: 200px;
+    max-height: 54vh;
+    overflow-y: auto; /* Enables scrolling */
+    padding: 10px;
+    background: #f8f9fa;
+    border-radius: 5px;
+    border: 1px solid #ddd;
+    box-shadow: 2px 2px 5px rgba(0, 0, 0, 0.1);
+    font-size: 14px;
+    z-index: 1000;
+}
 
-## Table of Contents
-- [1. Problem](#problem)
-- [2. Data Warehouses](#data-warehouses)
-    - [2.1. Security](#security)
-    - [2.2. Performance](#performance)
-    - [2.3 Operational Complexity](#complexity)
-- [3. Why Rust](#why-rust)
-    - [3.1. The Context and Alternatives](#context)
-    - [3.2 Type Safety](#type-safety)
-    - [3.3 Performance Considerations](#preformance-rust)
-    - [3.4 The Challenges of Working with Rust](#challenges-rust)
-- [4. A Homemade Cloud-Native ETL Pipeline](#etl)
-    - [4.1 Rust + Diesel for Postgres](#rust-diesel)
-    - [4.2 Rust + SQLX for Postgres](#rust-sqlx)
-    - [4.3 Rust's Type Safety in the ETL Process](#rust-type-safety)
-    - [4.4 S3 Integration and Parquet Output](#s3-parquet)
-- [5. Parallelism and Task Management](#parallelism)
-    - [5.1 Asynchronous Data Processing with Tokio](#asynchronous-tokio)
-    - [5.2 Parallel Data Processing with Rayon](#parallel-rayon)
-    - [5.3 Memory Management Considerations](#memory-management)
-- [6. Handling Complex Data Types](#complex-types)
-    - [6.1 Decimal Handling for Financial Data](#decimal-finance)
-    - [6.2 Date and Time Handling](#date-time)
-    - [6.3 Jsonb and Array](#date-jsonb-array)
-- [7. Monitoring and Observability](#monitoring)
-    - [7.1 Structured Logging](#logging)
-    - [7.2 Metrics and Alerting](#logging)
-- [8. Reflecting on the Project: What Went Right and What Didn't](#reflecting)
-  - [8.1 Rust Versioning Challenges](#rust-versions)
-  - [8.2 The Pros and Cons of Diesel ORM](#orm-pros-cons)
-  - [8.3 Operational Complexity with a Homemade ETL](#operational-complexity)
-- [9. Conclusion: Lessons Learned and Moving Forward](#conclusion)
-  - [9.1 Key Takeaways](#takeways)
-  - [9.2 Future Directions](#future)
+  .toc-sidebar ul {
+      list-style: none;
+      padding-left: 0;
+  }
+
+  .toc-sidebar li {
+      margin-bottom: 5px;
+  }
+
+  .toc-sidebar a {
+      text-decoration: none;
+      color: #0073e6;
+  }
+
+  .toc-sidebar a:hover {
+      text-decoration: underline;
+  }
+
+  .content {
+  margin-left: 480px; /* Adjust so the main content does not overlap */
+  max-width: 800px;
+}
+</style>
+
+
+<nav class="toc-sidebar">
+  <h3>Table of Contents</h3>
+  <ul>
+    <li><a href="#problem">1. Problem</a></li>
+    <li><a href="#data-warehouses">2. Data Warehouses</a>
+      <ul>
+        <li><a href="#security">2.1 Security</a></li>
+        <li><a href="#performance">2.2 Performance</a></li>
+        <li><a href="#complexity">2.3 Operational Complexity</a></li>
+      </ul>
+    </li>
+    <li><a href="#why-rust">3. Why Rust</a>
+      <ul>
+        <li><a href="#context">3.1 The Context and Alternatives</a></li>
+        <li><a href="#type-safety">3.2 Type Safety</a></li>
+        <li><a href="#preformance-rust">3.3 Performance Considerations</a></li>
+        <li><a href="#challenges-rust">3.4 The Challenges of Working with Rust</a></li>
+      </ul>
+    </li>
+    <li><a href="#etl">4. A Homemade Cloud-Native ETL Pipeline</a>
+      <ul>
+        <li><a href="#rust-diesel">4.1 Rust + Diesel for Postgres</a></li>
+        <li><a href="#rust-sqlx">4.2 Rust + SQLX for Postgres</a></li>
+        <li><a href="#rust-type-safety">4.3 Rust's Data Transformation in the ETL Process</a></li>
+        <li><a href="#s3-parquet">4.4 S3 Integration and Parquet Output</a></li>
+      </ul>
+    </li>
+    <li><a href="#parallelism">5. Parallelism and Task Management</a>
+      <ul>
+        <li><a href="#asynchronous-tokio">5.1 Asynchronous Data Processing with Tokio</a></li>
+        <li><a href="#parallel-rayon">5.2 Parallel Data Processing with Rayon</a></li>
+        <li><a href="#memory-management">5.3 Memory Management Considerations</a></li>
+      </ul>
+    </li>
+    <li><a href="#complex-types">6. Handling Complex Data Types</a>
+      <ul>
+        <li><a href="#decimal-finance">6.1 Decimal Handling for Financial Data</a></li>
+        <li><a href="#date-time">6.2 Date and Time Handling</a></li>
+        <li><a href="#date-jsonb-array">6.3 Jsonb and Array</a></li>
+      </ul>
+    </li>
+    <li><a href="#monitoring">7. Monitoring and Observability</a>
+      <ul>
+        <li><a href="#logging">7.1 Structured Logging</a></li>
+        <li><a href="#metrics">7.2 Metrics and Alerting</a></li>
+      </ul>
+    </li>
+    <li><a href="#reflecting">8. Reflecting on the Project</a>
+      <ul>
+        <li><a href="#rust-versions">8.1 Rust Versioning Challenges</a></li>
+        <li><a href="#orm-pros-cons">8.2 The Pros and Cons of Diesel ORM</a></li>
+        <li><a href="#operational-complexity">8.3 Operational Complexity with a Homemade ETL</a></li>
+      </ul>
+    </li>
+    <li><a href="#conclusion">9. Conclusion: Lessons Learned and Moving Forward</a>
+      <ul>
+        <li><a href="#takeways">9.1 Key Takeaways</a></li>
+        <li><a href="#future">9.2 Future Directions</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+
+
+[//]: # (## Table of Contents)
+
+[//]: # (- [1. Problem]&#40;#problem&#41;)
+
+[//]: # (- [2. Data Warehouses]&#40;#data-warehouses&#41;)
+
+[//]: # (    - [2.1. Security]&#40;#security&#41;)
+
+[//]: # (    - [2.2. Performance]&#40;#performance&#41;)
+
+[//]: # (    - [2.3 Operational Complexity]&#40;#complexity&#41;)
+
+[//]: # (- [3. Why Rust]&#40;#why-rust&#41;)
+
+[//]: # (    - [3.1. The Context and Alternatives]&#40;#context&#41;)
+
+[//]: # (    - [3.2 Type Safety]&#40;#type-safety&#41;)
+
+[//]: # (    - [3.3 Performance Considerations]&#40;#preformance-rust&#41;)
+
+[//]: # (    - [3.4 The Challenges of Working with Rust]&#40;#challenges-rust&#41;)
+
+[//]: # (- [4. A Homemade Cloud-Native ETL Pipeline]&#40;#etl&#41;)
+
+[//]: # (    - [4.1 Rust + Diesel for Postgres]&#40;#rust-diesel&#41;)
+
+[//]: # (    - [4.2 Rust + SQLX for Postgres]&#40;#rust-sqlx&#41;)
+
+[//]: # (    - [4.3 Rust's Type Safety in the ETL Process]&#40;#rust-type-safety&#41;)
+
+[//]: # (    - [4.4 S3 Integration and Parquet Output]&#40;#s3-parquet&#41;)
+
+[//]: # (- [5. Parallelism and Task Management]&#40;#parallelism&#41;)
+
+[//]: # (    - [5.1 Asynchronous Data Processing with Tokio]&#40;#asynchronous-tokio&#41;)
+
+[//]: # (    - [5.2 Parallel Data Processing with Rayon]&#40;#parallel-rayon&#41;)
+
+[//]: # (    - [5.3 Memory Management Considerations]&#40;#memory-management&#41;)
+
+[//]: # (- [6. Handling Complex Data Types]&#40;#complex-types&#41;)
+
+[//]: # (    - [6.1 Decimal Handling for Financial Data]&#40;#decimal-finance&#41;)
+
+[//]: # (    - [6.2 Date and Time Handling]&#40;#date-time&#41;)
+
+[//]: # (    - [6.3 Jsonb and Array]&#40;#date-jsonb-array&#41;)
+
+[//]: # (- [7. Monitoring and Observability]&#40;#monitoring&#41;)
+
+[//]: # (    - [7.1 Structured Logging]&#40;#logging&#41;)
+
+[//]: # (    - [7.2 Metrics and Alerting]&#40;#logging&#41;)
+
+[//]: # (- [8. Reflecting on the Project: What Went Right and What Didn't]&#40;#reflecting&#41;)
+
+[//]: # (  - [8.1 Rust Versioning Challenges]&#40;#rust-versions&#41;)
+
+[//]: # (  - [8.2 The Pros and Cons of Diesel ORM]&#40;#orm-pros-cons&#41;)
+
+[//]: # (  - [8.3 Operational Complexity with a Homemade ETL]&#40;#operational-complexity&#41;)
+
+[//]: # (- [9. Conclusion: Lessons Learned and Moving Forward]&#40;#conclusion&#41;)
+
+[//]: # (  - [9.1 Key Takeaways]&#40;#takeways&#41;)
+
+[//]: # (  - [9.2 Future Directions]&#40;#future&#41;)
 
 Hey there! 
 
@@ -63,7 +201,7 @@ And we didn't want to denormalize the tables by storing all the calculated field
 
 Choosing the Right Backend
 
-When you're building a cloud-native ETL pipeline, picking the right data warehouse is crucial. Here's what we focused on:
+When building a cloud-native ETL pipeline, picking the right data warehouse is crucial. Here's what we focused on:
 
 **<span id="security">2.1. Security</span>**
 
@@ -83,35 +221,31 @@ These measures combine to create a defense-in-depth approach that keeps our data
 
 **<span id="performance">2.2. Performance</span>**
 
-We designed our data flow to handle high-volume data without slowing down our main application. By optimizing our Postgres queries and leveraging Rust's parallelism capabilities, we keep data processing quick and efficient. Rust's low-level memory control also helped minimize overhead during batch processing.
+We designed our data flow to handle high-volume data efficiently without slowing down our main application. By optimizing Postgres queries and leveraging Rust’s concurrency model, we keep data processing fast and resource-efficient. Rust’s low-level memory control also minimizes overhead during batch processing.
 
-Our performance optimization definition includes:
+Our performance optimizations include:
 
-_Efficient Streaming_: Streaming a data in chunks for the big tables.
+_Efficient Streaming_: Processing large tables in chunks to avoid memory bloat.
 
-_Parallel Processing_: Rust's concurrency model lets us process multiple chunks of data at the same time.
+_Concurrent Execution_: Using Rust’s async runtime (Tokio) and multithreading (Rayon) to process multiple chunks of data in parallel.
 
-_Asynchronous Processing_: Rust's tokio run time model lets us process tasks asynchronously.
+_Optimized Storage_: Storing output in Parquet, a columnar format that significantly improves query performance and reduces storage costs.
 
-_Columnar Data Format_: Using Parquet as our output format dramatically improves storage efficiency and query performance for downstream analytics.
-
-_Query Optimization_: We make effective use of database indexes and design queries to minimize unnecessary data retrieval.
-
+_Query Optimization_: Leveraging database indexes and writing efficient SQL to minimize unnecessary reads and computations.
 
 **<span id="complexity">2.3 Operational Complexity</span>**
 
-Managing an ETL pipeline can quickly become unmanageable, especially when while scaling up. We kept operational complexity in check by leaning on Rust's type safety.
+Scaling an ETL pipeline often introduces complexity, but Rust’s type safety helped us maintain reliability while reducing operational overhead.
 
-In a traditional ETL pipeline built with something like Python, many errors only show up at runtime - potentially after the pipeline has been running for a while.
-With Rust, we catch problems at compile-time, which means:
+In traditional Python-based ETL pipelines, many errors only surface at runtime—sometimes after the pipeline has been running for hours. With Rust, we catch these issues at compile time, ensuring:
 
-_Fewer Production Incidents_: Type mismatches and null pointer exceptions get caught before deployment, not propagating the wrong data into the reports.
+_Fewer Production Incidents_: Type mismatches and null pointer issues are eliminated before deployment, preventing corrupt data from entering reports.
 
-_Less Monitoring Overhead_: We spend less time building extensive monitoring because the compiler catches many issues upfront.
+_Lower Monitoring Overhead_: Since many errors are caught at compile-time, we spend less time building extensive monitoring for runtime failures.
 
-_Clearer Error Handling_: Rust's Result and Option types force us to explicitly handle error cases, leading to more robust code.
+_Clearer Error Handling_: Rust’s Result and Option types enforce explicit handling of edge cases, leading to more robust and predictable code.
 
-This focus on type safety improves reliability and helps us to maintain our pipeline.
+By prioritizing performance and correctness, we built an ETL pipeline that is both fast and reliable—without excessive operational complexity.
 
 **<span id="why-rust">3. Why Rust</span>**
 
@@ -136,9 +270,9 @@ Rust looked promising.
 
 **<span id="type-safety">3.2 Type Safety</span>**
 
-Unlike Python where runtime errors are implied, Rust ensures type safety from the application layer all the way to table definitions. By catching errors at compile-time, we dramatically reduce the chances of runtime failures.
+Rust enforces type safety not just at runtime but from the application layer down to the database schema. Unlike Python, where type mismatches may only surface during execution, Rust’s strong typing catches issues at compile-time—eliminating entire classes of runtime failures.
 
-Check out how we define our data models in Rust:
+For example, here’s how we define our data models in Rust:
 
 ```rust
 use bigdecimal::BigDecimal;
@@ -165,42 +299,40 @@ It maps directly to our Postgres table through Diesel's ORM.
 
 It enforces type safety when reading data from the database.
 
-It validates data before serialization to Parquet
+It validates data before serialization to Parquet.
 
-The compiler makes sure we handle all potential type mismatches, null values, and conversion errors. You can't get this level of safety with dynamically typed languages.
+The compiler makes sure we handle all potential type mismatches, null values, and conversion errors. We can't get this level of safety with dynamically typed languages.
+
+By explicitly defining types and leveraging Rust’s strict compiler checks, we ensure data integrity before our ETL even runs.
+
 
 **<span id="performance-rust">3.3 Performance Considerations</span>**
 
-Rust isn't just safe; it's blazing fast. We're dealing with large datasets, and Rust's performance is hard to beat for data processing tasks. Plus, it lets us create small executables with minimal memory overhead, which is perfect for cloud environments.
+Rust isn’t just safe—it’s blazing fast. With large datasets, Rust’s performance is hard to beat for ETL workloads. It also produces small executables with minimal memory overhead, making it ideal for cloud deployments.
 
-Our ETL workloads process millions of records every day, and Rust gives us several performance advantages:
+Our ETL processes millions of records daily, and Rust gives us several key advantages:
 
-_Low Memory Overhead_: No garbage collection means predictable memory usage patterns.
+_Low Memory Overhead_: No garbage collection means predictable and efficient memory usage.
 
-_CPU Efficiency_: Batch processing is CPU-intensive, and Rust's zero-cost abstractions mean we can process more data with fewer compute resources.
+_CPU Efficiency_: Rust’s zero-cost abstractions allow us to process more data with fewer compute resources.
 
-_Small Binaries_: Our compiled ETL applications are typically under 250MB, which makes deployment and scaling quick and efficient.
+_Small Binaries_: Our compiled ETL applications stay under 250MB, making deployments and scaling efficient.
 
-When we're processing time-sensitive data, these performance benefits translate directly to the fresher data for analysis and decision-making.
+When dealing with time-sensitive data, these optimizations directly translate to fresher insights for decision-making.
 
 **<span id="challenges-rust">3.4 The Challenges of Working with Rust</span>**
 
-Working with Rust came with its own set of challenges anyone considering a similar approach should know about.
+Rust’s ownership model, borrowing rules, and strict type system introduced an initial learning curve. Managing large datasets efficiently required deep familiarity with Rust’s concurrency model.
 
-Getting comfortable with its ownership and borrowing rules took some serious learning. Handling large data structures, managing memory efficiently and wrangling concurrency was sometimes tricky and challenging. But in the end, the performance and safety we got made those hardships worth it.
+We also faced challenges in:
 
-Some specific expected pain points:
+_Long compile times_ impacting iteration speed.
 
-_Steep Learning Curve_: It took our team months to fully wrap our heads around how to handle most types and the huge tables.
+_Dependency management_ across macOS (local) and Kubernetes (Ubuntu-based) environments.
 
-_Limited Library Ecosystem_: While growing fast, Rust's ecosystem for data processing wasn't as mature as Python's or Java's when we started.
+_Smaller ecosystem_ compared to Python and Java, requiring more custom solutions.
 
-_Compile Times_: Large Rust projects can be slow to compile, which hurt developer productivity. It also required different packages installation while running locally on Macos vs Kubernetes ubuntu pod.
-
-_Collaboration Challenges_: Finding engineers within the team with Rust experience is harder than finding engineers who know Python or Java.
-
-We're still convinced Rust was the right choice for us. The benefits in production have far outweighed the development difficulties.
-
+For a detailed breakdown of the operational complexities, including Diesel ORM’s schema handling and ETL challenges, see Section [8.2](#rust-versions) and [8.3](#orm-proc-cons).
 **<span id="etl">4. A Homemade Cloud-Native ETL Pipeline</span>**
 
 Here what we had in mind for our ETL pipeline:
@@ -224,7 +356,6 @@ Our Rust project is called **Dracula** because it carefully sips production data
 
 The full code (condenced and without specific tables is located [**here**](https://github.com/kraftaa/dracula)).
 
-Here's how it works:
 
 **<span id="rust-diesel">4.1 Rust + Diesel for Postgres</span>**
 
@@ -290,23 +421,25 @@ The _**diesel_ext**_ crate then was used to generate the Rust struct for that ta
 
 If there's a mismatch between our Rust struct and the database schema, the compilation fails, preventing runtime errors.
 
-We also started pagination big tables with Diesel using _offset_ and _limit_ and our own struct and trait [RecordIter](https://github.com/kraftaa/dracula/blob/main/dracula_tasks/src/tasks/page_iter.rs) but later switched to SQLX, because:
-
-_Async Support_
-- SQLx is fully async and works well with Rust’s async ecosystem (Tokio), allowing for non-blocking database queries.
-- Diesel, on the other hand, is synchronous (unless you use Diesel Async, which is still less mature).
-
-_Better Support for Dynamic Queries_
-- SQLx allows you to write raw SQL queries easily, making it simpler to implement flexible pagination logic.
-- Diesel relies on a strong type system and query builder, which can make complex pagination queries harder to construct.
-
-_Streaming Large Results_
-- SQLx supports database cursors and fetch() for efficient streaming of paginated results, avoiding the need to load everything into memory at once.
-- Diesel loads the entire result set into memory before paginating, which can be inefficient for large datasets.
+We also started pagination big tables with Diesel using _offset_ and _limit_ and our own struct and trait [RecordIter](https://github.com/kraftaa/dracula/blob/main/dracula_tasks/src/tasks/page_iter.rs) but later switched to SQLX.
 
 **<span id="rust-sqlx">4.2 Rust + SQLX for Postgres</span>**
 
-To handle large datasets from Postgres, we use SQLX (asynchronous SQL queries). It lets us read and stream queries efficiently, grabbing data in manageable chunks. This keeps memory usage down and prevents timeouts when processing huge datasets.
+To handle large datasets from Postgres, we use SQLX (asynchronous SQL queries). SQLX is preferable over Diesel for streaming large tables, because:
+
+_Async Support_
+- SQLx is fully async and works well with Rust’s async ecosystem (Tokio), allowing for non-blocking database queries.
+- Diesel, on the other hand, is synchronous (unless using Diesel Async, which is still less mature).
+
+_Better Support for Dynamic Queries_
+- SQLx allows to write raw SQL queries easily, making it simpler to implement flexible pagination logic.
+- Diesel relies on a strong type system and query builder, which can make complex pagination queries harder to construct.
+
+_Streaming Large Results_
+- SQLx supports database _cursors_ and _fetch()_ for efficient streaming of paginated results, avoiding the need to load everything into memory at once.
+- Diesel loads the entire result set into memory before paginating, which can be inefficient for large datasets.
+
+It lets us read and stream queries efficiently, grabbing data in manageable chunks. This keeps memory usage down and prevents timeouts when processing huge datasets.
 We also don't need to define table! macro and structs for the table, SQLX can define the struct to match the results of the SQL query. We still have some tables & structs for streaming tables, as they were defined before we figured out SQLX and were dealing with the pagination.
 
 
@@ -336,9 +469,7 @@ while let Some(chunks) = chunk_stream.next().await {
 This function fetches the table in batches and processes each batch as it goes. The approach prevents us from loading the entire dataset into memory at once, which would be a problem with very large tables.
 
 
-**<span id="rust-type-safety">4.3 Rust's Type Safety in the ETL Process</span>**
-
-Rust's type system is a great help for ensuring data integrity throughout the pipeline. From fetching data from Postgres to writing it into Parquet, we validate data structures at compile-time, making sure each step is correct before the pipeline even runs.
+**<span id="rust-type-safety">4.3 Rust's Data Transformation in the ETL Process</span>**
 
 A key part of our ETL process is transforming data between formats. Here's how we handle the transformation from our database model to our Parquet output model:
 
@@ -484,7 +615,7 @@ Rayon's thread pool manages execution, using up to _num_threads(2)_ threads beca
 
 **<span id="memory-management">5.3 Memory Management Considerations</span>**
 
-When you're processing large datasets, memory management becomes super important. Rust's ownership model helps us control memory usage precisely:
+When processing large datasets, memory management becomes super important. Rust's ownership model helps us control memory usage precisely:
 ```rust
 let mut chunk_stream = wpc_stream.map(|fs| fs.unwrap()).chunks(5000);
 while let Some(chunks) = chunk_stream.next().await {
@@ -543,16 +674,16 @@ The chrono crate gives us comprehensive datetime handling capabilities, letting 
 
 **<span id="date-jsonb-array">6.3 Jsonb and Array</span>**
 
-Many of our descriptive fields were stored in PostgreSQL using jsonb or ARRAY formats.
-While we were able to load and work with both jsonb and ARRAY in Rust, using:
+Many of our descriptive fields are stored in PostgreSQL using jsonb or ARRAY formats.
+While we are able to load and work with both jsonb and ARRAY in Rust, using:
 
 ```rust
 pub justifications: Option<Vec<String>>,
 pub options: Option<serde_json::Value>,
 ```
 
-we encountered challenges when writing these columns to Parquet while preserving their original types.
-To store them in Parquet, we had to convert them into String, effectively storing the entire ARRAY or jsonb blob as a serialized string. This introduced an additional parsing step when querying the data, impacting performance and usability.
+we can't write these columns to Parquet while preserving their original types.
+To store them in Parquet, we have to convert them into String, effectively storing the entire ARRAY or jsonb blob as a serialized string. This introduces an additional parsing step when querying the data, impacting performance and usability.
 
 **<span id="monitoring">7. Monitoring and Observability</span>**
 
@@ -579,7 +710,7 @@ This approach gives us detailed insights into how the pipeline is running, with 
 
 **<span id="metrics">7.2 Metrics and Alerting</span>**
 
-We also used to collect performance metrics with Prometheys an eye on the health of our pipeline, but later got rid of it as didn't have time to analyze it.
+We also used to collect performance metrics with Prometheus, but later got rid of it as didn't have time to analyze it.
 
 **<span id="reflecting">8. Reflecting on the Project: What Went Right and What Didn't</span>**
 
@@ -587,8 +718,8 @@ Looking back, the project had its share of wins and challenges.
 
 **<span id="rust-versions">8.1 Rust Versioning Challenges</span>**
 
-One major headache was versioning. We couldn't upgrade to the latest stable Rust version because of compatibility issues with dependencies. This meant we couldn't use certain advanced features, which slowed down development at times.
-We were stuck on Rust 1.69 for over two years due to significant changes in many core packages. Upgrading to 1.80 would have required substantial effort, and since we don’t plan to support the project long-term, we chose to remain on 1.69.  This prevented us from using a bunch of modern Rust features, including:
+One major headache is versioning. We can't upgrade to the latest stable Rust version because of compatibility issues with dependencies. This meant we can't use certain advanced features, which slows down development at times.
+We were stuck on Rust 1.69 for over two years due to significant changes in many core packages. Upgrading to 1.80 would have required substantial effort, and since we don’t plan to support the project long-term, we chose to remain on 1.69.  This prevents us from using a bunch of modern Rust features, including:
 
 - #[derive(Default)] on Enums:
 - Improved Error Messages for Borrow Checker: More user-friendly error messages for common borrow-checker issues.

@@ -1,0 +1,13 @@
+# Ignore the _site folder where Jekyll generates the site
+_site/
+
+# Ignore Sass cache folder
+.sass-cache/
+
+# Ignore bundler config files
+.bundle/
+
+# Ignore editor backup files
+*.swp
+
+.DS_Store

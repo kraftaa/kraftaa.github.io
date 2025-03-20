@@ -932,7 +932,7 @@ table tfoot td {
   left: 0;
   bottom: 0;
   width: 240px;
-  height: 90%;
+  height: 100%; /* 90 */
   padding: 20px 10px;
   background-color: #ffffff;
 }
