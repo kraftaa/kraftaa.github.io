@@ -11,7 +11,7 @@ site-twitter: #if your site has a twitter account, enter it here
 # Author Settings
 author: Maria Dubyaga
 author-img: maria-dubyaga.png
-about-author: I am a software engineer focusing on Rust, Kubernetes, Superset, AWS.
+about-author: I am a software engineer focusing on Rust, Kubernetes, AWS, DBT, Superset.
 social-twitter: # add your Twitter handle
 social-facebook: # add your Facebook handle
 social-github: kraftaa
