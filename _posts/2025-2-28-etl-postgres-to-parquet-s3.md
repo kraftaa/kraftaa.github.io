@@ -4,7 +4,13 @@ title: "Building a Cloud-Native ETL with Rust: A Retrospective"
 date: 2024-12-17
 img: rustacean-flat-happy.svg
 tags: [Rust, AWS, S3, Postgres]
+excerpt_separator: <!--more-->
 ---
+Hey there!
+
+This is a walkthrough of a cloud-native ETL pipeline we built using Rust.
+
+<!--more-->
 
 <style>
   .toc-sidebar {
@@ -173,9 +179,11 @@ tags: [Rust, AWS, S3, Postgres]
 
 [//]: # (  - [9.2 Future Directions]&#40;#future&#41;)
 
-Hey there! 
+[//]: # (Hey there! )
 
-This is a walkthrough of a cloud-native ETL pipeline we built using Rust.
+[//]: # ()
+[//]: # (This is a walkthrough of a cloud-native ETL pipeline we built using Rust.)
+
 It was a fascinating project, both for the challenges we faced and the lessons we learned along the way.
 It was originally started by my colleague and Rust wizard [**Xavier Lange**](https://github.com/xrl).
 We were dealing with everything from Postgres integration to writing Parquet files on AWS S3, with a focus on performance, type safety, and keeping operational headaches to a minimum. 
