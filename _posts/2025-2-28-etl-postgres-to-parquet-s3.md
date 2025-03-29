@@ -265,7 +265,7 @@ Rust wasn't the first choice for ETL when we started this project. The data engi
 When we started this project, we looked at the next options:
 
 _Apache Spark_: It's powerful, but Spark would bring too much operational complexity and resource overhead for our relatively modest data volumes (tens of GBs rather than TBs).
-Spark (we tried PySpark) was doing great job with workers but all of them were dependent on the master and Java errors' description wasn't the best, making it harder to debug.
+Spark (we tried PySpark) was doing great job with workers but all of them were dependent on the master and Java errors' description wasn't the best, making it harder to debug. 
 
 _Python-based ETL_: Airflow was getting popular, but we had concerns about type safety and performance with Python for what we needed to do. Python dataframes were struggling with our big tables especially with the cross-table calculations.
 We could include pure SQL code into Airflow DAGs, but it would violate our security considerations.
@@ -381,7 +381,7 @@ _Dependency management_ across macOS (local) and Kubernetes (Ubuntu-based) envir
 
 _Smaller ecosystem_ compared to Python and Java, requiring more custom solutions.
 
-For a detailed breakdown of the operational complexities, including Diesel ORM’s schema handling and ETL challenges, see Section [8.2](#rust-versions) and [8.3](#orm-proc-cons).
+For a detailed breakdown of the operational complexities, including Diesel ORM’s schema handling and ETL challenges, see Section [7.1](#rust-versions) and [7.2](#orm-proc-cons).
 
 **<span id="etl">4. A Homemade Cloud-Native ETL Pipeline</span>**
 
