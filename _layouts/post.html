@@ -19,6 +19,8 @@ layout: main
         <h1 class="page-title">{{page.title}}</h1>
         <div class="page-date"><span>{{page.date | date: '%Y, %b %d'}}&nbsp;&nbsp;&nbsp;&nbsp;</span></div>
       </header>
+      <meta name="description" content="{{ page.excerpt | strip_html | truncate: 160 }}">
+
       {{content | markdownify}}
       <div class="page-footer">
         <div class="page-share">
