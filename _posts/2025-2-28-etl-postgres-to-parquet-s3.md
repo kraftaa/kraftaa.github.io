@@ -4,6 +4,7 @@ title: "Building a Cloud-Native ETL with Rust: A Retrospective"
 date: 2024-12-17
 img: rustacean-flat-happy.svg
 tags: [Rust, AWS, S3, Postgres]
+excerpt: "This article explores the challenges and solutions of building a cloud-native ETL pipeline using Rust, integrating with PostgreSQL, AWS S3"
 excerpt_separator: <!--more-->
 ---
 Hey there!
