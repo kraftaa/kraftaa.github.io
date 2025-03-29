@@ -1,7 +1,6 @@
 title: Rust and everything. Hi, I'm Maria Dubyaga
-description: > # this means to ignore newlines until "baseurl:"
-  This website explores modern technologies like Rust, Kubernetes, and dbt, focusing on building scalable and efficient cloud-native applications. 
-  We also will look at the data visualization and reporting with tools like Apache Supersets.
+description: A website dedicated to exploring Rust, Kubernetes, dbt, and Superset for building efficient and scalable cloud-native applications.
+
 permalink: ':title/'
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "" # the base hostname & protocol for your site, e.g. http://example.com
