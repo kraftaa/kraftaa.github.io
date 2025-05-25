@@ -1423,7 +1423,8 @@ a.newer-posts:hover {
   }
   .about img {
     width: 100px;
-    height: 100px;
+    height: auto;
+    /*height: 100px;*/
     -webkit-border-radius: 90%;
             border-radius: 90%;
     margin-bottom: 10px;

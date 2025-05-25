@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Fixing the lack of DBT dry-run option"
-date: 2025-05-01
+date: 2025-5-01
 img: dbt.png
 tags: [Kubernetes, DBT]
 ---
@@ -65,7 +65,7 @@ You can't check multiple interdependent models together unless they already exis
 
 I need to  add LIMIT 0 in compiled files.
 
-The full code for adding `LIMIT 0` and running database check  [**is here**](https://gist.github.com/kraftaa/0a72a8ae35f92f2d9a3a2c12d2f686b0) would give diesel _table!_ definition.
+The full code for adding `LIMIT 0` and running database check  [**is here**](https://gist.github.com/kraftaa/0a72a8ae35f92f2d9a3a2c12d2f686b0).
 
 
 ####  Alternative: Use a Fake Database
