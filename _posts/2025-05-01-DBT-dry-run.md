@@ -1,8 +1,8 @@
 ---
 layout: post
 title: "Fixing the lack of DBT dry-run option"
-date: 2024-12-17
-img: superset.png
+date: 2025-05-01
+img: dbt.png
 tags: [Kubernetes, DBT]
 ---
 
