@@ -10,8 +10,7 @@ tags: [Kubernetes, DBT]
 - [Problem](#problem)
 - [The Solution](#the-solution)
   - [The Hacky but Effective Solution](#the-hacky-but-effective-solution)
-    - [The Hacky but Effective Solution](#the-hacky-but-effective-solution)
-- [Alternative: Use a Dummy Database](#alternative:-use-a-dummy-database)
+  - [Alternative: Use a Dummy Database](#alternative-use-a-dummy-database)
 
 
 ## Problem:
