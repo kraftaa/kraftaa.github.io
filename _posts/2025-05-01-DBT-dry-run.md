@@ -107,4 +107,6 @@ PGPASSWORD=password psql \
   < public_schema.sql
 ```
 
+The caveat here: you need to update the schema from your primary instance either by cloning the schema file from your app repo, or running schema updates with these commands with each migration (need to be automated).
+
 If you’ve hit issues where dbt run fails halfway through because of a missing column, or you want to validate transformations during CI/CD without building the models—this method is for you.
