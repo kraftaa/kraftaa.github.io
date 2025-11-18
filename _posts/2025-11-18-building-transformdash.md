@@ -21,9 +21,7 @@ The interesting parts:
 
 **DAG Resolution**: Built a dependency resolver that figures out model execution order. If you have `gold_users` that depends on `silver_users` that depends on `stg_users`, it runs them in the right order automatically.
 
-**Incremental Models**: You can write `{% if is_incremental() %}` logic and it actually works. The tricky part was tracking state between runs without requiring a separate database for metadata.
-
-**Multiple Materializations**: Models can be views, tables, or incremental tables. Each has different performance tradeoffs, just like in dbt.
+**Multiple Materializations**: Models can be views or tables, each with different performance tradeoffs. You can also write models with incremental syntax (`{% raw %}{% if is_incremental() %}{% endraw %}`), but right now they do full refreshes. True incremental support - where the system tracks table state and does INSERT-only updates instead of DROP/CREATE - is on the roadmap.
 
 **Built-in Viz**: Since I was already building the execution layer, I threw in a dashboard system. It's nothing fancy - Chart.js on the frontend - but it's handy for quick data checks.
 
@@ -39,7 +37,7 @@ The deployment story is pretty straightforward: Docker Compose for local develop
 
 **SQL Composition is Hard**: Building SQL queries programmatically while keeping them safe from injection is tricky. Python's string formatting wants to make it easy to shoot yourself in the foot. I ended up using psycopg2.sql everywhere and writing validation for every identifier.
 
-**Incremental Logic is Subtle**: dbt makes incremental models look simple, but there's a lot of edge case handling. What happens if the source table changes schema? What if someone drops the incremental table? I'm still working through some of these scenarios.
+**Incremental Logic is Subtle**: dbt makes incremental models look simple, but there's a lot of edge case handling. What happens if the source table changes schema? What if someone drops the incremental table? I have the syntax working (you can write `{% raw %}{% if is_incremental() %}{% endraw %}`), but right now it just does full refreshes. Implementing true incremental support - tracking state, detecting changes, doing INSERT instead of DROP/CREATE - is on my todo list.
 
 **Documentation Takes Forever**: I thought coding was the hard part. Turns out writing docs that actually help people get started is way harder. I went through three rewrites of the README before it made sense.
 
@@ -76,8 +74,8 @@ Then hit localhost:8000. Default login is admin/admin.
 
 I'm planning to add:
 
+- True incremental model support (tracking state, INSERT-only updates)
 - A testing framework for model validation
-- Better incremental model strategies
 - Support for more databases (ClickHouse would be interesting)
 - Some kind of scheduling system
 
