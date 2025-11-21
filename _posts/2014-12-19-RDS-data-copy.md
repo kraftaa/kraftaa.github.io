@@ -5,7 +5,7 @@ date: 2024-12-17
 img: postgresql3.png
 tags: [Rust, Postgres, DBT]
 ---
-_Work in progress_
+_Contains code, waiting for the full description_
 &nbsp;
 
 ## Problem:
