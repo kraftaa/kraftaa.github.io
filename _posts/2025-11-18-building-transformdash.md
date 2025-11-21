@@ -2,6 +2,7 @@
 layout: post
 title: "Building TransformDash: A Lightweight Alternative to dbt"
 date: 2025-11-18
+img: chart.avif
 categories: [data-engineering, open-source]
 ---
 
