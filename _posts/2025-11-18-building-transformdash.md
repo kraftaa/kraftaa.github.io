@@ -55,21 +55,48 @@ But for small to medium datasets and quick iterations, it's pretty useful.
 
 ## Try It Out
 
-The code is on GitHub: [https://github.com/kraftaa/transformdash](https://github.com/kraftaa/transformdash)
+**Live Demo**: [https://transformdash-demo.onrender.com](https://transformdash-demo.onrender.com) (login: demo/demo)
 
-If you're interested in data transformation tools or have feedback, I'd love to hear it. I'm not trying to compete with dbt - this is more for situations where dbt is too heavy or doesn't quite fit.
+The demo runs on Render's free tier and includes sample e-commerce data (100 customers, 500 orders). You can run transformations, build dashboards, and explore the lineage visualization. First load takes 30-60 seconds if the server is sleeping.
 
-Installation is pretty straightforward if you have Docker:
+**Install from PyPI**:
+
+```bash
+pip install transformdash
+```
+
+**Or run from source**:
 
 ```bash
 git clone https://github.com/kraftaa/transformdash.git
 cd transformdash
-cp .env.example .env
-# Add JWT_SECRET_KEY to .env
 docker-compose up -d
 ```
 
-Then hit localhost:8000. Default login is admin/admin.
+GitHub: [https://github.com/kraftaa/transformdash](https://github.com/kraftaa/transformdash)
+
+## Deploying Your Own Demo
+
+Hosting a demo on Render's free tier is straightforward. Add a `render.yaml`:
+
+```yaml
+services:
+  - type: web
+    name: transformdash-demo
+    env: docker
+    plan: free
+
+databases:
+  - name: transformdash-db
+    plan: free
+```
+
+Connect your GitHub repo, and Render handles the rest. The free tier includes:
+- PostgreSQL database (90 days, renewable)
+- Web service (sleeps after 15 min, wakes in 30 sec)
+- Auto-deployment on git push
+
+The entrypoint script automatically seeds sample data, creates read-only protections for source tables, and sets up demo credentials. Perfect for letting people try your data platform before installing.
 
 ## What's Next
 
