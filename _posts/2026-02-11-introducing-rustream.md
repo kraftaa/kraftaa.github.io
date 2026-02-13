@@ -114,7 +114,7 @@ The codebase is small -- about 8 Rust source files:
 
 ## Coming Soon: Apache Iceberg Support
 
-We're currently working on Iceberg output support on a feature branch. Instead of writing standalone Parquet files, rustream will be able to write proper Iceberg tables with metadata JSON, manifests, and snapshots. This means query engines like Athena, Trino, and Spark can read the data as a real table with time travel and schema evolution.
+I'm currently working on Iceberg output support on a feature branch. Instead of writing standalone Parquet files, rustream will be able to write proper Iceberg tables with metadata JSON, manifests, and snapshots. This means query engines like Athena, Trino, and Spark can read the data as a real table with time travel and schema evolution.
 
 The config will look like:
 
@@ -125,7 +125,7 @@ catalog:
   type: filesystem
 ```
 
-Under the hood, we're using the official [Apache Iceberg Rust crate](https://crates.io/crates/iceberg) (v0.8) with its `MemoryCatalog` for filesystem-based catalogs, and optional AWS Glue catalog support for Athena users.
+Under the hood, I'm using the official [Apache Iceberg Rust crate](https://crates.io/crates/iceberg) (v0.8) with its `MemoryCatalog` for filesystem-based catalogs, and optional AWS Glue catalog support for Athena users.
 
 ## Installation
 
