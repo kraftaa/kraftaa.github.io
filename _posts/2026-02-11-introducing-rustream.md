@@ -129,7 +129,13 @@ Under the hood, I'm using the official [Apache Iceberg Rust crate](https://crate
 
 ## Installation
 
-You can install from PyPI (it ships as a Python wheel via maturin):
+You can install directly from PyPI -- it ships as a pre-built Python wheel via maturin, so you get a native Rust binary without needing a Rust toolchain:
+
+```bash
+pip install rustream
+```
+
+Or if you prefer isolated tool installs:
 
 ```bash
 pipx install rustream
@@ -142,6 +148,18 @@ git clone https://github.com/kraftaa/rustream.git
 cd rustream
 cargo build --release
 ```
+
+## Also Check Out: TransformDash
+
+If you're interested in the transformation side of the pipeline, I also built [**TransformDash**](https://github.com/kraftaa/transformdash) -- a lightweight alternative to dbt that runs SQL transformations directly against your Postgres or MongoDB without needing a dedicated data warehouse. It supports dbt-style `{{ ref() }}` and `{{ source() }}` macros, DAG resolution, and has a built-in dashboard for quick data checks.
+
+It's also available on PyPI:
+
+```bash
+pip install transformdash
+```
+
+You can read more about it in my [earlier post]({% post_url 2025-11-18-building-transformdash %}).
 
 ## Try It Out
 
