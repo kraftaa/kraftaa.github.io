@@ -52,11 +52,33 @@ Then run:
 dracula sync --config config.yaml
 ```
 
-That's it. It connects to Postgres, reads each table in batches, converts rows to Arrow RecordBatches, writes Snappy-compressed Parquet files, and uploads them to local disk or S3.
+That's it. No Rust structs to define, no schema macros to generate, no compile step per table. The schema is figured out on the fly.
+
+## How the Schema Works (No More Diesel Boilerplate)
+
+This is the big difference from [Dracula](https://github.com/kraftaa/dracula). With Diesel, every table needed manual setup before you could even read from it:
+
+1. `diesel print-schema` to generate a `table!` macro
+2. A `#[derive(Queryable)]` struct with fields matching every column
+3. A separate `ParquetRecordWriter` implementation to map those fields to Parquet columns
+4. Rebuild and recompile every time you add a table
+
+In rustream, **all of this happens at runtime**. When you run a sync, the tool connects to Postgres and queries `information_schema.columns` to discover every column, its type, and whether it's nullable:
+
+```sql
+SELECT column_name, data_type, is_nullable
+FROM information_schema.columns
+WHERE table_schema = $1 AND table_name = $2
+ORDER BY ordinal_position
+```
+
+Then it maps each Postgres type to an Arrow data type on the fly -- `integer` becomes `Int32`, `timestamptz` becomes `Timestamp(Microsecond, UTC)`, `jsonb` becomes `Utf8` (stored as a JSON string), `uuid` becomes `Utf8`, and so on. From that mapping, it builds an Arrow `Schema` and reads rows directly into Arrow `RecordBatch`es using `tokio-postgres`, converting each column value into the right Arrow array type.
+
+The result: you add three lines to a YAML file instead of writing hundreds of lines of Rust. And if a table gains new columns, the next sync picks them up automatically -- no code changes, no recompile.
 
 ## Key Features
 
-**Schema introspection** -- No need to define Rust structs for each table. The tool queries `information_schema.columns` and maps Postgres types (int, text, timestamptz, jsonb, uuid, etc.) to Arrow types automatically.
+**Schema introspection** -- The tool queries `information_schema.columns` and maps Postgres types (int, text, timestamptz, jsonb, uuid, arrays, etc.) to Arrow types automatically. Unknown types fall back to `Utf8` so nothing breaks.
 
 **Incremental sync** -- Set an `incremental_column` (like `updated_at`) and the tool tracks a high watermark in a local SQLite database. On each run it only reads rows newer than the last sync.
 
